@@ -1,0 +1,3 @@
+CREATE TABLE IF NOT EXISTS foundation_marker (
+    id INTEGER PRIMARY KEY
+);
