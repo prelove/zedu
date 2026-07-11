@@ -10,7 +10,7 @@
 
 - 后端按 `cmd/internal/pkg/migrations`；业务模块采用model/dto/handler/service/repository/routes/errors分层。
 - SQLite使用modernc驱动，启动强制foreign_keys、WAL和busy_timeout；migration支持up/down/up。
-- 前端采用Vue3/Vite/TypeScript strict/Naive UI；只建立shell、i18n和健康页，不复制未锁定模板主分支。
+- 前端采用Vue3/Vite/TypeScript strict；只建立shell、i18n和健康页，不复制未锁定模板主分支。Naive UI延后到真实页面能力需要时再评估。
 - 文本UTF-8/LF；日期UTC；locale为zh-CN/ja-JP/en-US；CI校验key parity。
 - 日志结构化并含request/correlation ID，默认脱敏。
 

@@ -4,7 +4,7 @@ context: |
   唯一业务事实源：docs/2_prd/Zedu-PRD-Final-v3.1.md。
   当前里程碑：先完成并验收 MVP，再进入 V1；总进度见 docs/roadmap/MASTER_ROADMAP.md。
   MVP 已批准包含 Resend 邮件通知和付款凭证上传；正式老师结款属于 V1，MVP 不得暴露可执行入口。
-  后端：Go/Gin/GORM/modernc SQLite；前端：Vue 3/Vite/TypeScript/Naive UI。
+  后端：Go/Gin/GORM/modernc SQLite；前端：Vue 3/Vite/TypeScript。Naive UI 仅在后续页面能力确有需求时引入。
   金额禁止 float；账务写入必须单事务、幂等、可回滚；历史财务事实不可覆盖。
   文档中文优先；产品 locale 为 zh-CN/ja-JP/en-US；仓库 UTF-8，兼容 Windows 10 日文环境。
   所有任务遵循 PRD → Requirement → Scenario → Task → Test → Evidence，并遵循 docs/governance/GOVERNANCE.md 的统一 DoD。

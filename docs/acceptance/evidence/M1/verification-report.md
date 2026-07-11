@@ -78,16 +78,22 @@
 
 ## 已知风险
 
-1. **API 路径不匹配**：前端 `HealthStatus.vue` 请求 `/api/healthz`，后端服务 `/healthz`。Vite proxy 将 `/api` 转发到 `http://localhost:8080` 但不重写路径，导致 `/api/healthz` → `http://localhost:8080/api/healthz`（后端无此路由）。这是 M1-CODEX-01 集成验收需要处理的契约对齐问题。前端测试使用 mock fetch，后端测试独立验证，各自通过但端到端集成需修复路径映射。
+1. **API路径契约已修复，待提交复验**：前端与Vite开发代理均使用`/healthz`；实际验证`http://127.0.0.1:8080/healthz`和`http://127.0.0.1:5173/healthz`均返回`200 {"status":"ok"}`。
 2. **`-race` 不可用**：Windows 默认 CGO_ENABLED=0，`-race` 需要 CGO。非 race 测试全部通过，建议 CI 在 Linux 上启用 `-race`。
-3. **npm audit 漏洞**：`npm ci` 报告 10 个漏洞（2 low, 4 moderate, 2 high, 2 critical），均为 dev 依赖中的传递依赖。不影响生产构建，但应在 M1-CODEX-01 中评估是否需要 `npm audit fix`。
+3. **npm audit漏洞已修复，待提交复验**：升级Vue、vue-i18n、Vite、Vitest、ESLint及对应锁文件后，`npm audit --audit-level=high`和`npm audit --omit=dev --audit-level=high`均为0漏洞。
 
 ## 未测试项
 
-- 端到端集成（前端→后端健康检查实际 HTTP 请求）——因 API 路径不匹配未验证
+- 端到端集成（前端→后端健康检查实际 HTTP 请求）——已手工验证，后续M1证据需附命令输出
 - `-race` 并发检测——Windows CGO 限制
 - CI 流水线（GitHub Actions）——M1-CODEX-01 范围
 - OpenSpec strict 校验重跑——需在集成分支上重新运行
+
+## 独立审查后的补救项
+
+- `M1-GLM-02`：幂等模板seed框架、重复调用与事务回滚测试，当前为M1唯一功能性阻断项。
+- CI已补Windows/Ubuntu应用门禁、Ubuntu `-race`、前端覆盖率和只读gofmt检查；需随补救提交在GitHub Actions实际验证。
+- M1不得在上述项完成、独立复验通过前标记为`ACCEPTED`。
 
 ## 状态
 

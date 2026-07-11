@@ -20,15 +20,15 @@
 ## 进行中
 
 - M1-GLM-01 和 M1-KIMI-01 已完成实现并集成到 `m1/integration-glm-kimi` 分支。
-- 全部测试通过（后端 8/8、前端 57/57、覆盖率 100%），构建通过。
+- 集成验收已修复健康检查契约和前端依赖漏洞；独立审查发现缺少幂等seed框架，M1-GLM-02已发布。
 - 集成验证报告见 `docs/acceptance/evidence/M1/verification-report.md`。
 - 等待独立 Reviewer 签署后更新 OpenSpec tasks 和路线图。
 
 ## 下一步
 
-1. 独立 Reviewer 审查集成分支并签署。
-2. Codex 执行 `M1-CODEX-01`：CI 建立、API 路径契约对齐、npm audit 评估。
-3. 签署后更新 OpenSpec tasks、追踪矩阵、路线图和 M1 evidence。
+1. GLM执行`docs/tasks/M1/M1-GLM-02-seed-foundation.md`。
+2. Kimi执行只读预审`docs/tasks/M2/M2-KIMI-00-readiness-review.md`。
+3. Codex集成seed并完成M1独立复验；签署后更新OpenSpec tasks、追踪矩阵、路线图和M1 evidence。
 
 ## 阻塞
 

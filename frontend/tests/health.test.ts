@@ -47,6 +47,7 @@ describe('HealthStatus component', () => {
       global: { plugins: [i18n] },
     })
     await flushPromises()
+    expect(globalThis.fetch).toHaveBeenCalledWith('/healthz')
     expect(wrapper.text()).toContain(zhCN.health.healthy)
   })
 

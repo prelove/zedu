@@ -16,7 +16,7 @@ async function checkHealth(): Promise<void> {
   state.value = 'loading'
   errorMessage.value = ''
   try {
-    const response = await fetch('/api/healthz')
+    const response = await fetch('/healthz')
     if (response.ok) {
       state.value = 'healthy'
     } else {
