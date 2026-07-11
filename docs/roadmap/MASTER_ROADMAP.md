@@ -25,4 +25,11 @@
 - [x] 建立编码、测试、验收、AI协作、i18n、安全规范
 - [x] 生成并严格校验首个 READY change（后续能力按依赖逐个创建，禁止空壳）
 - [x] 初始化 Git 并配置 GitHub remote
-- [ ] 按Lore协议提交并推送GitHub
+- [x] 按Lore协议提交并推送GitHub
+
+## M1 执行分配
+
+- GLM：`docs/tasks/M1/M1-GLM-01-backend-foundation.md`（READY）
+- Kimi：`docs/tasks/M1/M1-KIMI-01-frontend-foundation.md`（READY）
+- Codex：`docs/tasks/M1/M1-CODEX-01-integration-acceptance.md`（等待两工单交付）
+- 共享看板：`docs/tasks/M1/M1_EXECUTION_BOARD.md`

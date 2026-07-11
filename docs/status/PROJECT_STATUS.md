@@ -19,12 +19,13 @@
 
 ## 进行中
 
-- Git初始基线提交和GitHub推送。
+- M1已拆为GLM后端、Kimi前端、Codex集成三条受控工单，等待执行工具认领。
 
 ## 下一步
 
-1. 按Lore Commit Protocol提交并推送。
-2. 认领M1任务1.1，建立工具与工程版本基线。
+1. GLM执行`docs/tasks/M1/M1-GLM-01-backend-foundation.md`。
+2. Kimi执行`docs/tasks/M1/M1-KIMI-01-frontend-foundation.md`。
+3. Codex审查并执行`M1-CODEX-01`集成验收。
 
 ## 阻塞
 
