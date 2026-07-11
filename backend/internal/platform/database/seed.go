@@ -13,6 +13,22 @@ const foundationMarkerKey = "foundation.marker"
 // UTF-8 roundtrip in seed metadata. It has no business semantics.
 const foundationMarkerValue = "基盤マーカー 🎓 中文 😀"
 
+// FaultHook is a test-controllable hook called after the seed row is
+// inserted within the transaction but before Commit. It receives the
+// transaction so tests can verify in-transaction state. In production
+// the hook is nil and the fast path is taken.
+type FaultHook = func(tx *sql.Tx) error
+
+var faultHook FaultHook
+
+// SetFaultHook sets a test-controllable fault injection hook called
+// between the seed INSERT and the transaction Commit. Passing nil
+// clears the hook. This is not safe for concurrent use and is
+// intended for testing only.
+func SetFaultHook(h FaultHook) {
+	faultHook = h
+}
+
 // ApplyFoundationSeed inserts the minimal, non-business foundation marker
 // into the database. It is idempotent: repeated calls do not create
 // duplicate rows and do not alter existing data.
@@ -48,6 +64,15 @@ func ApplyFoundationSeed(ctx context.Context, db *sql.DB) error {
 		foundationMarkerValue,
 	); err != nil {
 		return fmt.Errorf("insert foundation marker: %w", err)
+	}
+
+	// Test fault injection point: after the seed row is written
+	// within the transaction but before Commit. In production
+	// faultHook is nil and this block is skipped entirely.
+	if faultHook != nil {
+		if err := faultHook(tx); err != nil {
+			return fmt.Errorf("fault injected before commit: %w", err)
+		}
 	}
 
 	if err := tx.Commit(); err != nil {

@@ -3,7 +3,9 @@ package database_test
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/prelove/zedu/backend/internal/platform/database"
@@ -102,26 +104,55 @@ func TestFoundationSeedIdempotent(t *testing.T) {
 	}
 }
 
-// TestFoundationSeedTransactionRollback verifies that if a failure occurs
-// during seed application, the transaction rolls back and no partial data
-// is written. We inject a fault by closing the DB connection before
-// calling ApplyFoundationSeed, then reopen the same database file to
-// verify zero seed rows exist.
+// TestFoundationSeedTransactionRollback verifies the full transaction
+// rollback sequence using a test-controllable fault hook:
+//
+//  1. BeginTx succeeds (the hook is called, which means we passed BeginTx).
+//  2. The first foundation_seed record is written within the transaction
+//     (the hook queries the tx and finds 1 row).
+//  3. The hook returns an error, injecting a fault before Commit.
+//  4. ApplyFoundationSeed returns that error.
+//  5. A fresh connection to the same DB file confirms 0 rows persisted.
+//
+// This replaces the previous approach of closing the DB before calling
+// ApplyFoundationSeed, which only proved BeginTx failed — not that a
+// real transaction with writes rolls back on commit-time faults.
 func TestFoundationSeedTransactionRollback(t *testing.T) {
 	db, dsn, _ := newMigratedDB(t)
 
-	// Close the DB to simulate a connection failure during seed.
-	db.Close()
+	var hookCalled bool
+	var rowsInTransaction int
 
-	// ApplyFoundationSeed must return an error — the closed connection
-	// prevents any SQL execution.
+	database.SetFaultHook(func(tx *sql.Tx) error {
+		hookCalled = true
+		// Query within the transaction to prove the seed row was
+		// written before the fault is injected.
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM foundation_seed`).Scan(&rowsInTransaction); err != nil {
+			return fmt.Errorf("query in transaction: %w", err)
+		}
+		return fmt.Errorf("injected fault before commit")
+	})
+	defer database.SetFaultHook(nil)
+
 	err := database.ApplyFoundationSeed(context.Background(), db)
 	if err == nil {
-		t.Fatalf("expected error when seeding with closed DB, got nil")
+		t.Fatalf("expected error from injected fault, got nil")
+	}
+
+	// Prove BeginTx succeeded and the hook was called (which means
+	// we got past BeginTx and the INSERT).
+	if !hookCalled {
+		t.Fatalf("fault hook was not called — BeginTx or INSERT may have failed before the hook")
+	}
+
+	// Prove the first foundation_seed record was written within the
+	// transaction before the fault was injected.
+	if rowsInTransaction != 1 {
+		t.Fatalf("expected 1 row visible inside transaction before commit, got %d", rowsInTransaction)
 	}
 
 	// Reopen a fresh connection to the same database file to verify
-	// no partial data was written by the failed seed.
+	// the transaction was rolled back — no partial data persisted.
 	freshDB, err := database.Open(dsn)
 	if err != nil {
 		t.Fatalf("reopen database: %v", err)
@@ -152,13 +183,13 @@ func TestFoundationSeedUTF8Metadata(t *testing.T) {
 	}
 
 	// Must contain Chinese, Japanese, and emoji characters.
-	if !containsSubstr(value, "中文") {
+	if !strings.Contains(value, "中文") {
 		t.Errorf("seed value missing Chinese characters: %q", value)
 	}
-	if !containsSubstr(value, "マーカー") {
+	if !strings.Contains(value, "マーカー") {
 		t.Errorf("seed value missing Japanese characters: %q", value)
 	}
-	if !containsSubstr(value, "😀") {
+	if !strings.Contains(value, "😀") {
 		t.Errorf("seed value missing emoji: %q", value)
 	}
 }
@@ -178,17 +209,4 @@ func TestFoundationSeedUniqueConstraint(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected UNIQUE constraint violation on duplicate insert, got nil")
 	}
-}
-
-func containsSubstr(s, substr string) bool {
-	return len(s) >= len(substr) && indexOf(s, substr) >= 0
-}
-
-func indexOf(s, substr string) int {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return i
-		}
-	}
-	return -1
 }
