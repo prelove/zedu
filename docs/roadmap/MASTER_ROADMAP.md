@@ -5,7 +5,7 @@
 | 里程碑 | 能力 | 状态 | 退出条件 |
 |---|---|---|---|
 | M0 | 治理、PRD修订、OpenSpec 1.6迁移、规范、仓库基线 | ACCEPTED | strict通过、旧需求零孤儿、文档/证据齐全 |
-| M1 | 工程骨架、迁移、CI、i18n与质量门禁 | READY | 后端/前端可构建，up/down/up及Win JP通过 |
+| M1 | 工程骨架、迁移、CI、i18n与质量门禁 | IN_REVIEW | 后端/前端可构建，up/down/up及Win JP通过 |
 | M2 | 认证初始化、人员课程、报名安排 | BACKLOG | RBAC与核心资料E2E通过 |
 | M3 | 充值、流水、付款凭证 | BACKLOG | 事务/IDOR/恶意文件/补偿/恢复通过 |
 | M4a | 排课 | BACKLOG | 排课与通知副作用解耦 |
