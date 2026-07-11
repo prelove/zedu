@@ -1,8 +1,8 @@
 # 项目状态
 
-- 当前阶段：M1 工程骨架与质量门禁
-- 当前状态：IN_REVIEW
-- 当前目标：按 `establish-engineering-foundation` 建立可运行、可迁移、可构建的工程基线
+- 当前阶段：M2 规格冻结与执行准备
+- 当前状态：PLANNING
+- 当前目标：在 M1 已验收工程基线上冻结 M2 的业务边界、API 契约与可并行任务
 - 最近更新：2026-07-11
 
 ## 已完成
@@ -17,19 +17,19 @@
 - 新change `establish-engineering-foundation` 已完成四类规划工件并通过OpenSpec strict。
 - M0独立架构复验APPROVED；M0状态ACCEPTED。
 
-## 进行中
+## 已完成（M1）
 
-- M1-GLM-01 和 M1-KIMI-01 已完成实现并集成到 `m1/integration-glm-kimi` 分支。
-- 集成验收已修复健康检查契约和前端依赖漏洞；独立审查发现缺少幂等seed框架，M1-GLM-02已发布。
-- 集成验证报告见 `docs/acceptance/evidence/M1/verification-report.md`。
-- 等待独立 Reviewer 签署后更新 OpenSpec tasks 和路线图。
+- M1-GLM-01、M1-KIMI-01、M1-GLM-02 与集成任务均已独立审查并合入 `main`。
+- 本机后端 14 个测试、20 次稳定性回归、构建；前端 57/57 单测、100% 覆盖率、构建与生产依赖审计均通过。
+- GitHub Actions run `29153829469` 的 Windows/Ubuntu 治理与 foundation 四个 job 全绿；Ubuntu 已实际通过 `go test -race`。
+- M1 验收证据见 `docs/acceptance/evidence/M1/verification-report.md`；OpenSpec 任务已由验收人勾选。
 
 ## 下一步
 
-1. GLM执行`docs/tasks/M1/M1-GLM-02-seed-foundation.md`。
-2. Kimi执行只读预审`docs/tasks/M2/M2-KIMI-00-readiness-review.md`。
-3. Codex集成seed并完成M1独立复验；签署后更新OpenSpec tasks、追踪矩阵、路线图和M1 evidence。
+1. Codex 基于 PRD v3.1 与 M2 只读预审创建正式 OpenSpec change、设计与任务。
+2. 产品负责人确认“学生邮箱重复”语义后冻结 M2 API 契约。
+3. 仅在契约冻结后，向 GLM/Kimi 下达范围隔离的 M2 实现工单。
 
 ## 阻塞
 
-当前无 M0 阻塞。Resend sender/test inbox、凭证限制和备份参数在相应 MVP 门禁前确认。
+M2 尚未开始编码；阻塞项是学生邮箱重复时的业务语义与响应模型选择。Resend sender/test inbox、凭证限制和备份参数仍在相应 MVP 门禁前确认。

@@ -1,12 +1,12 @@
 # Zedu 总路线图
 
-> 当前焦点：M0。更新日期：2026-07-11。进度以验收门禁而非主观百分比计算。
+> 当前焦点：M2 规格冻结与执行准备。更新日期：2026-07-11。进度以验收门禁而非主观百分比计算。
 
 | 里程碑 | 能力 | 状态 | 退出条件 |
 |---|---|---|---|
 | M0 | 治理、PRD修订、OpenSpec 1.6迁移、规范、仓库基线 | ACCEPTED | strict通过、旧需求零孤儿、文档/证据齐全 |
-| M1 | 工程骨架、迁移、CI、i18n与质量门禁 | IN_REVIEW | 后端/前端可构建，up/down/up及Win JP通过 |
-| M2 | 认证初始化、人员课程、报名安排 | BACKLOG | RBAC与核心资料E2E通过 |
+| M1 | 工程骨架、迁移、CI、i18n与质量门禁 | ACCEPTED | Windows/Ubuntu CI全绿，Linux race、up/down/up及Win JP通过 |
+| M2 | 认证初始化、人员课程、报名安排 | PLANNING | 先冻结业务语义与API契约，再验证RBAC与核心资料E2E |
 | M3 | 充值、流水、付款凭证 | BACKLOG | 事务/IDOR/恶意文件/补偿/恢复通过 |
 | M4a | 排课 | BACKLOG | 排课与通知副作用解耦 |
 | M4b | Resend通知outbox-lite | BACKLOG | 幂等/lease/失败/重放/三语通过 |
@@ -27,9 +27,8 @@
 - [x] 初始化 Git 并配置 GitHub remote
 - [x] 按Lore协议提交并推送GitHub
 
-## M1 执行分配
+## M1 验收结论
 
-- GLM：`docs/tasks/M1/M1-GLM-01-backend-foundation.md`（READY）
-- Kimi：`docs/tasks/M1/M1-KIMI-01-frontend-foundation.md`（READY）
-- Codex：`docs/tasks/M1/M1-CODEX-01-integration-acceptance.md`（等待两工单交付）
-- 共享看板：`docs/tasks/M1/M1_EXECUTION_BOARD.md`
+- 结论：ACCEPTED；GitHub Actions run `29153829469` 全绿。
+- 证据：`docs/acceptance/evidence/M1/verification-report.md`。
+- 下一关：M2 OpenSpec 规格冻结，不允许绕过该关直接实现业务功能。

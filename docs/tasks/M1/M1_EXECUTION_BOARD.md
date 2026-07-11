@@ -1,13 +1,13 @@
 # M1 执行看板
 
-> OpenSpec change：`establish-engineering-foundation`。状态：READY。共享进度由 Codex/PM 唯一维护。
+> OpenSpec change：`establish-engineering-foundation`。状态：ACCEPTED（2026-07-11）。共享进度由 Codex/PM 唯一维护。
 
 | 工单 | 执行工具 | 范围 | 状态 | 依赖 | 验收人 |
 |---|---|---|---|---|---|
-| M1-GLM-01 | GLM | Go后端、健康检查、SQLite迁移、日志 | IN_REVIEW | M0 ACCEPTED | Codex + 独立Reviewer |
-| M1-KIMI-01 | Kimi | Vue/TS前端、三语、健康页与测试 | IN_REVIEW | M0 ACCEPTED | Codex + 独立Reviewer |
-| M1-CODEX-01 | Codex | 工具锁、共享脚本、CI、集成与证据 | READY | 两工单契约 | 独立Architect |
-| M1-GLM-02 | GLM | 幂等模板seed框架与测试 | READY | 当前M1集成基线 | Codex + 独立Reviewer |
+| M1-GLM-01 | GLM | Go后端、健康检查、SQLite迁移、日志 | ACCEPTED | M0 ACCEPTED | Codex + 独立Reviewer |
+| M1-KIMI-01 | Kimi | Vue/TS前端、三语、健康页与测试 | ACCEPTED | M0 ACCEPTED | Codex + 独立Reviewer |
+| M1-CODEX-01 | Codex | 工具锁、共享脚本、CI、集成与证据 | ACCEPTED | 两工单契约 | 独立Architect |
+| M1-GLM-02 | GLM | 幂等模板seed框架与测试 | ACCEPTED | 当前M1集成基线 | Codex + 独立Reviewer |
 
 建议分支：`m1/glm-backend-foundation`、`m1/kimi-frontend-foundation`。并行时必须使用独立clone或Git worktree，禁止两个工具在同一工作目录切换分支。
 

@@ -1,104 +1,54 @@
-# M1 集成验证报告
+# M1 工程基础验收报告
 
-- 日期：2026-07-11
-- 环境：Windows 10 日文区域环境；Go 1.23.3 windows/amd64；Node v24.8.0；npm 11.7.0
-- 集成分支：`m1/integration-glm-kimi`（从 `origin/main` 创建）
-- 合并顺序：GLM 后端 → Kimi 前端（按 M1_EXECUTION_BOARD 集成顺序）
+- 验收日期：2026-07-11
+- 验收结论：**ACCEPTED**
+- 范围：OpenSpec change `establish-engineering-foundation`
+- 发布基线：`main` / `2402b14`
+- 远端 CI：[GitHub Actions run 29153829469](https://github.com/prelove/zedu/actions/runs/29153829469)
 
-## 合并来源
+## 独立审查结论
 
-| 工单 | 分支 | Commit SHA | 改动文件数 |
-|---|---|---|---|
-| M1-GLM-01 | `m1/glm-backend-foundation` | `909c518` | 14 文件 (+943 行) |
-| M1-KIMI-01 | `m1/kimi-frontend-foundation` | `c919671` | 29 文件 (+7462 行) |
+`M1-GLM-02` 的幂等 seed 实现经两轮复审后接受。生产公开 API `ApplyFoundationSeed` 不暴露故障注入能力；测试通过包内未导出的 `applyFoundationSeed(..., hook)` 验证“写入已发生、提交前故障、事务回滚、持久化记录为零”的完整序列。无全局 hook、setter 或并发共享状态。
 
-合并无冲突（GLM 只写 `backend/`，Kimi 只写 `frontend/`，写入范围无交集）。
+## 本机验收证据（Windows 10 JP）
 
-## 后端测试证据（GLM）
+运行时：Go 1.23.3、Node 24.8.0、npm 11.7.0；所有文档与源文件均执行 UTF-8 校验。
 
-| 检查 | 命令 | 结果 |
+| 项目 | 新鲜验证结果 |
+|---|---|
+| Go 格式与静态检查 | `go fmt ./...`、`go vet ./...` 成功 |
+| Go 常规测试 | `go test ./... -count=1` 成功；14 个命名测试 |
+| Go 稳定性 | `go test ./... -count=20` 成功 |
+| Go 构建 | `go build ./cmd/zedu-server` 成功 |
+| 前端依赖 | `npm ci` 成功；锁文件可重建 |
+| 前端质量 | lint 零 warning、`vue-tsc --noEmit` 成功 |
+| 前端测试 | 8 个测试文件、57/57 通过 |
+| 覆盖率 | statements/branches/functions/lines 均为 100%（26/26、19/19、8/8、26/26） |
+| 前端构建与审计 | Vite 8.1.4 构建成功；`npm audit --omit=dev --audit-level=high` 为 0 漏洞 |
+| OpenSpec 与治理 | `openspec validate --all --strict --no-interactive`、编码校验、追溯校验均通过 |
+
+三语资源 `zh-CN`、`ja-JP`、`en-US` 由类型约束及递归比对测试校验 key 一致；CJK 与 emoji 往返测试通过。日期与 JPY 格式化明确使用 locale 和 `Asia/Tokyo`，不依赖 Windows 系统显示语言。
+
+## CI 验收证据
+
+GitHub Actions run `29153829469` 的四个 job 全部成功：
+
+| Job | 结论 | 关键覆盖 |
 |---|---|---|
-| 格式化 | `go fmt ./...` | 退出码 0，无输出 |
-| 静态检查 | `go vet ./...` | 退出码 0，无输出 |
-| 单元测试 | `go test ./... -count=1 -v` | 8/8 PASS（migration up/down/up、PRAGMA、外键强制、UTF-8 往返、健康检查、依赖边界、日志脱敏、请求ID） |
-| 稳定性 | `go test ./... -run "TestHealth\|TestMigration\|TestPragma\|TestUTF8\|TestRedaction" -count=20` | 退出码 0，20×8 全部 PASS |
-| 构建 | `go build ./cmd/zedu-server` | 退出码 0，二进制生成成功 |
+| governance / Ubuntu | 成功 | `npm ci`、OpenSpec strict、编码与追溯 |
+| governance / Windows | 成功 | 同上，验证 Windows 路径与 shell |
+| foundation / Ubuntu | 成功 | Go 格式、vet、测试、构建、**`go test ./... -race -count=1`**、前端全量门禁 |
+| foundation / Windows | 成功 | Go 格式、vet、测试、构建、前端全量门禁；Linux-only race 步骤按工作流设计跳过 |
 
-### BLOCKED: `-race` 标志
+本机 Windows 默认 `CGO_ENABLED=0`，故本机不运行 `-race`；该风险已由 Ubuntu CI 的实际 race 成功结果关闭。
 
-- 命令：`go test ./... -race -count=1`
-- 结果：`go: -race requires cgo; enable cgo by setting CGO_ENABLED=1`
-- 原因：Windows 工具链默认 CGO_ENABLED=0，`-race` 需要 CGO
-- 绕行：已运行非 race 版本全部通过；建议 CI 在 Ubuntu 上启用 `-race` 验证
+## 过程修复记录
 
-## 前端测试证据（Kimi）
+1. 统一 CI 两个 job 的 Node 版本为 24.8.0，避免主版本浮动。
+2. 修复历史归档文件被根目录 `backup/` 忽略规则误排除的问题：强制追踪经 `MANIFEST.sha256` 验证的 `legacy/.../specs/backup/spec.md`。此前 Ubuntu 干净 checkout 的追溯校验失败；修复后 Windows/Ubuntu 均通过。
+3. 早期 run `29153775308` 失败仅作为诊断证据，不用于验收；最终结论只依据 `29153829469`。
 
-| 检查 | 命令 | 结果 |
-|---|---|---|
-| 依赖安装 | `npm ci` | 退出码 0，346 packages installed |
-| Lint | `npm run lint` (`eslint . --max-warnings 0`) | 退出码 0，无警告 |
-| 类型检查 | `npm run typecheck` (`vue-tsc --noEmit`) | 退出码 0，TS strict 通过 |
-| 单元测试 | `npm run test:unit` (`vitest run`) | 57/57 PASS（8 个测试文件） |
-| 覆盖率 | `npm run test:coverage` | 行/语句/分支/函数覆盖率均 100%（目标 ≥80%） |
-| 构建 | `npm run build` (`vue-tsc --noEmit && vite build`) | 退出码 0，41 模块转换成功 |
+## 范围与遗留项
 
-### 三语验证
-
-- locale 固定 `zh-CN`、`ja-JP`、`en-US`
-- `ja-JP.ts` 和 `en-US.ts` 均使用 `LocaleSchema` 类型约束，编译期保证 key parity
-- `i18n.test.ts` 递归比对三语 key 集合完全一致
-- 测试覆盖三种 locale 各至少一次（health.test.ts 中 zh-CN/ja-JP/en-US 分别验证）
-- CJK 和 emoji 字符验证通过（`i18n.test.ts` 正则匹配）
-- 日期/JPY 格式化使用显式 locale 和 `Asia/Tokyo`，不依赖 Windows 系统语言
-
-## 依赖审查
-
-### 后端依赖
-
-| 依赖 | 版本 | 理由 |
-|---|---|---|
-| `modernc.org/sqlite` | v1.29.10 | 纯 Go SQLite 驱动，禁止 CGO 和 mattn/go-sqlite3（任务要求） |
-| 间接依赖（humanize/uuid/lru 等） | 固定版本 | modernc.org/sqlite 的传递依赖，非直接引入 |
-
-### 前端依赖
-
-| 依赖 | 版本 | 理由 |
-|---|---|---|
-| `vue` | 3.5.13 | Vue 3 框架（任务要求） |
-| `vue-i18n` | 11.1.1 | 三语 i18n 支持（任务要求） |
-| `vite` | 6.0.7 | 构建工具（任务要求） |
-| `typescript` | 5.7.3 | TS strict 模式（任务要求） |
-| `vitest` | 2.1.8 | 单元测试框架 |
-| `@vue/test-utils` | 2.4.6 | Vue 组件测试工具 |
-| `eslint` / `@vue/eslint-config-typescript` | 9.17.0 / 14.2.0 | Lint（`no-explicit-any: error`） |
-| `jsdom` | 25.0.1 | 测试 DOM 环境 |
-| `@vitest/coverage-v8` | 2.1.8 | 覆盖率收集 |
-
-所有版本均为固定版本，无 `latest`、`*` 或无上限范围。未引入 Naive UI（健康页无真实需求）。未拉取 Soybean Admin。
-
-## 已知风险
-
-1. **API路径契约已修复，待提交复验**：前端与Vite开发代理均使用`/healthz`；实际验证`http://127.0.0.1:8080/healthz`和`http://127.0.0.1:5173/healthz`均返回`200 {"status":"ok"}`。
-2. **`-race` 不可用**：Windows 默认 CGO_ENABLED=0，`-race` 需要 CGO。非 race 测试全部通过，建议 CI 在 Linux 上启用 `-race`。
-3. **npm audit漏洞已修复，待提交复验**：升级Vue、vue-i18n、Vite、Vitest、ESLint及对应锁文件后，`npm audit --audit-level=high`和`npm audit --omit=dev --audit-level=high`均为0漏洞。
-
-## 未测试项
-
-- 端到端集成（前端→后端健康检查实际 HTTP 请求）——已手工验证，后续M1证据需附命令输出
-- `-race` 并发检测——Windows CGO 限制
-- CI 流水线（GitHub Actions）——M1-CODEX-01 范围
-- OpenSpec strict 校验重跑——需在集成分支上重新运行
-
-## 独立审查后的补救项
-
-- `M1-GLM-02`：幂等模板seed框架、重复调用与事务回滚测试，当前为M1唯一功能性阻断项。
-- CI已补Windows/Ubuntu应用门禁、Ubuntu `-race`、前端覆盖率和只读gofmt检查；需随补救提交在GitHub Actions实际验证。
-- M1不得在上述项完成、独立复验通过前标记为`ACCEPTED`。
-
-## 状态
-
-- 集成合并：完成，无冲突
-- 全部测试：通过（后端 8/8 + 前端 57/57）
-- 构建：通过（后端二进制 + 前端 dist）
-- 独立 Reviewer 签署：待定
-- OpenSpec tasks 勾选：待独立 Reviewer 签署后更新
+- M1 只提供工程基础，不包含认证、人员、课程、报名、财务、排课或正式结款业务实现。
+- M2 实现前必须先冻结学生邮箱重复语义及 API 失败/警告响应模型；该决策已登记为下一阶段前置条件。
