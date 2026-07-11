@@ -35,6 +35,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err := database.ApplyFoundationSeed(context.Background(), db); err != nil {
+		slog.Error("apply foundation seed", slog.Any("error", err))
+		os.Exit(1)
+	}
+
 	mux := httpserver.New()
 	handler := logging.NewMiddleware(logger)(mux)
 
