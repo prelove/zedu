@@ -1,14 +1,13 @@
-package database_test
+package database
 
 import (
 	"context"
 	"database/sql"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/prelove/zedu/backend/internal/platform/database"
 )
 
 // newMigratedDB opens a temp DB and runs all migrations up, returning the db,
@@ -18,18 +17,19 @@ func newMigratedDB(t *testing.T) (*sql.DB, string, string) {
 	tmpDir := t.TempDir()
 	dsn := "file:" + filepath.Join(tmpDir, "test.db")
 
-	db, err := database.Open(dsn)
+	db, err := Open(dsn)
 	if err != nil {
 		t.Fatalf("open database: %v", err)
 	}
 
 	migrationsDir := filepath.Join("..", "..", "..", "migrations")
-	if err := database.MigrateUp(db, migrationsDir); err != nil {
+	if err := MigrateUp(db, migrationsDir); err != nil {
 		t.Fatalf("migrate up: %v", err)
 	}
 
 	t.Cleanup(func() {
 		db.Close()
+		os.Remove(filepath.Join(tmpDir, "test.db"))
 	})
 
 	return db, dsn, migrationsDir
@@ -41,7 +41,7 @@ func newMigratedDB(t *testing.T) (*sql.DB, string, string) {
 func TestFoundationSeedCreatesMarker(t *testing.T) {
 	db, _, _ := newMigratedDB(t)
 
-	if err := database.ApplyFoundationSeed(context.Background(), db); err != nil {
+	if err := ApplyFoundationSeed(context.Background(), db); err != nil {
 		t.Fatalf("apply foundation seed: %v", err)
 	}
 
@@ -72,7 +72,7 @@ func TestFoundationSeedCreatesMarker(t *testing.T) {
 func TestFoundationSeedIdempotent(t *testing.T) {
 	db, _, _ := newMigratedDB(t)
 
-	if err := database.ApplyFoundationSeed(context.Background(), db); err != nil {
+	if err := ApplyFoundationSeed(context.Background(), db); err != nil {
 		t.Fatalf("first seed: %v", err)
 	}
 
@@ -83,7 +83,7 @@ func TestFoundationSeedIdempotent(t *testing.T) {
 	}
 
 	// Call seed a second time — must not error, must not duplicate.
-	if err := database.ApplyFoundationSeed(context.Background(), db); err != nil {
+	if err := ApplyFoundationSeed(context.Background(), db); err != nil {
 		t.Fatalf("second seed: %v", err)
 	}
 
@@ -105,25 +105,26 @@ func TestFoundationSeedIdempotent(t *testing.T) {
 }
 
 // TestFoundationSeedTransactionRollback verifies the full transaction
-// rollback sequence using a test-controllable fault hook:
+// rollback sequence using an internal fault hook passed to
+// applyFoundationSeed:
 //
 //  1. BeginTx succeeds (the hook is called, which means we passed BeginTx).
 //  2. The first foundation_seed record is written within the transaction
 //     (the hook queries the tx and finds 1 row).
 //  3. The hook returns an error, injecting a fault before Commit.
-//  4. ApplyFoundationSeed returns that error.
+//  4. applyFoundationSeed returns that error.
 //  5. A fresh connection to the same DB file confirms 0 rows persisted.
 //
-// This replaces the previous approach of closing the DB before calling
-// ApplyFoundationSeed, which only proved BeginTx failed — not that a
-// real transaction with writes rolls back on commit-time faults.
+// This test uses the internal applyFoundationSeed (not the public
+// ApplyFoundationSeed) to pass a fault hook. The public API has no
+// way to inject faults — it always passes nil.
 func TestFoundationSeedTransactionRollback(t *testing.T) {
 	db, dsn, _ := newMigratedDB(t)
 
 	var hookCalled bool
 	var rowsInTransaction int
 
-	database.SetFaultHook(func(tx *sql.Tx) error {
+	hook := func(tx *sql.Tx) error {
 		hookCalled = true
 		// Query within the transaction to prove the seed row was
 		// written before the fault is injected.
@@ -131,10 +132,9 @@ func TestFoundationSeedTransactionRollback(t *testing.T) {
 			return fmt.Errorf("query in transaction: %w", err)
 		}
 		return fmt.Errorf("injected fault before commit")
-	})
-	defer database.SetFaultHook(nil)
+	}
 
-	err := database.ApplyFoundationSeed(context.Background(), db)
+	err := applyFoundationSeed(context.Background(), db, hook)
 	if err == nil {
 		t.Fatalf("expected error from injected fault, got nil")
 	}
@@ -153,7 +153,7 @@ func TestFoundationSeedTransactionRollback(t *testing.T) {
 
 	// Reopen a fresh connection to the same database file to verify
 	// the transaction was rolled back — no partial data persisted.
-	freshDB, err := database.Open(dsn)
+	freshDB, err := Open(dsn)
 	if err != nil {
 		t.Fatalf("reopen database: %v", err)
 	}
@@ -173,7 +173,7 @@ func TestFoundationSeedTransactionRollback(t *testing.T) {
 func TestFoundationSeedUTF8Metadata(t *testing.T) {
 	db, _, _ := newMigratedDB(t)
 
-	if err := database.ApplyFoundationSeed(context.Background(), db); err != nil {
+	if err := ApplyFoundationSeed(context.Background(), db); err != nil {
 		t.Fatalf("apply seed: %v", err)
 	}
 
@@ -200,7 +200,7 @@ func TestFoundationSeedUTF8Metadata(t *testing.T) {
 func TestFoundationSeedUniqueConstraint(t *testing.T) {
 	db, _, _ := newMigratedDB(t)
 
-	if err := database.ApplyFoundationSeed(context.Background(), db); err != nil {
+	if err := ApplyFoundationSeed(context.Background(), db); err != nil {
 		t.Fatalf("apply seed: %v", err)
 	}
 

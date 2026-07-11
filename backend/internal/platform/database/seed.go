@@ -13,21 +13,11 @@ const foundationMarkerKey = "foundation.marker"
 // UTF-8 roundtrip in seed metadata. It has no business semantics.
 const foundationMarkerValue = "基盤マーカー 🎓 中文 😀"
 
-// FaultHook is a test-controllable hook called after the seed row is
-// inserted within the transaction but before Commit. It receives the
-// transaction so tests can verify in-transaction state. In production
-// the hook is nil and the fast path is taken.
-type FaultHook = func(tx *sql.Tx) error
-
-var faultHook FaultHook
-
-// SetFaultHook sets a test-controllable fault injection hook called
-// between the seed INSERT and the transaction Commit. Passing nil
-// clears the hook. This is not safe for concurrent use and is
-// intended for testing only.
-func SetFaultHook(h FaultHook) {
-	faultHook = h
-}
+// faultHook is an internal-only function called after the seed row is
+// inserted within the transaction but before Commit. It is only used
+// by internal tests via applyFoundationSeed; production code calls
+// ApplyFoundationSeed which always passes nil.
+type faultHook = func(tx *sql.Tx) error
 
 // ApplyFoundationSeed inserts the minimal, non-business foundation marker
 // into the database. It is idempotent: repeated calls do not create
@@ -42,6 +32,14 @@ func SetFaultHook(h FaultHook) {
 // This function MUST be called after MigrateUp has completed. It does
 // not create schema — only data rows.
 func ApplyFoundationSeed(ctx context.Context, db *sql.DB) error {
+	return applyFoundationSeed(ctx, db, nil)
+}
+
+// applyFoundationSeed is the internal implementation that accepts an
+// optional fault hook for testing. When hook is non-nil it is called
+// after the seed INSERT succeeds within the transaction but before
+// Commit. If the hook returns an error, the transaction is rolled back.
+func applyFoundationSeed(ctx context.Context, db *sql.DB, hook faultHook) error {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin seed transaction: %w", err)
@@ -66,11 +64,11 @@ func ApplyFoundationSeed(ctx context.Context, db *sql.DB) error {
 		return fmt.Errorf("insert foundation marker: %w", err)
 	}
 
-	// Test fault injection point: after the seed row is written
-	// within the transaction but before Commit. In production
-	// faultHook is nil and this block is skipped entirely.
-	if faultHook != nil {
-		if err := faultHook(tx); err != nil {
+	// Internal fault injection point: after the seed row is written
+	// within the transaction but before Commit. Production callers
+	// pass nil and this block is skipped entirely.
+	if hook != nil {
+		if err := hook(tx); err != nil {
 			return fmt.Errorf("fault injected before commit: %w", err)
 		}
 	}
