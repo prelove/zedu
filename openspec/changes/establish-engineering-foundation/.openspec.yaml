@@ -1,0 +1,3 @@
+schema: spec-driven
+created: 2026-07-11
+goal: 在业务功能开发前形成可构建、可测试、可迁移且兼容Win10 JP的工程基线

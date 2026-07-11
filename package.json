@@ -1,0 +1,14 @@
+{
+  "name": "zedu-workspace",
+  "private": true,
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "devDependencies": {
+    "@fission-ai/openspec": "1.6.0"
+  },
+  "scripts": {
+    "spec:validate": "openspec validate --all --strict --no-interactive",
+    "spec:doctor": "openspec doctor"
+  }
+}

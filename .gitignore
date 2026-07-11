@@ -1,0 +1,26 @@
+# Runtime and secrets
+.env
+.env.*
+!.env.example
+data/
+logs/
+backup/
+dist/
+
+# Dependencies and build output
+node_modules/
+frontend/node_modules/
+frontend/dist/
+backend/bin/
+coverage/
+
+# Local agent runtime (plans/specs remain tracked separately by policy)
+.omx/logs/
+.omx/state/
+.omx/metrics.json
+
+# Editors and OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
