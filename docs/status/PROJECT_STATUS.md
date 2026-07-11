@@ -1,7 +1,7 @@
 # 项目状态
 
 - 当前阶段：M1 工程骨架与质量门禁
-- 当前状态：READY
+- 当前状态：IN_REVIEW
 - 当前目标：按 `establish-engineering-foundation` 建立可运行、可迁移、可构建的工程基线
 - 最近更新：2026-07-11
 
@@ -19,13 +19,16 @@
 
 ## 进行中
 
-- M1已拆为GLM后端、Kimi前端、Codex集成三条受控工单，等待执行工具认领。
+- M1-GLM-01 和 M1-KIMI-01 已完成实现并集成到 `m1/integration-glm-kimi` 分支。
+- 集成验收已修复健康检查契约和前端依赖漏洞；独立审查发现缺少幂等seed框架，M1-GLM-02已发布。
+- 集成验证报告见 `docs/acceptance/evidence/M1/verification-report.md`。
+- 等待独立 Reviewer 签署后更新 OpenSpec tasks 和路线图。
 
 ## 下一步
 
-1. GLM执行`docs/tasks/M1/M1-GLM-01-backend-foundation.md`。
-2. Kimi执行`docs/tasks/M1/M1-KIMI-01-frontend-foundation.md`。
-3. Codex审查并执行`M1-CODEX-01`集成验收。
+1. GLM执行`docs/tasks/M1/M1-GLM-02-seed-foundation.md`。
+2. Kimi执行只读预审`docs/tasks/M2/M2-KIMI-00-readiness-review.md`。
+3. Codex集成seed并完成M1独立复验；签署后更新OpenSpec tasks、追踪矩阵、路线图和M1 evidence。
 
 ## 阻塞
 

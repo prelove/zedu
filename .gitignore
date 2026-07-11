@@ -3,6 +3,8 @@
 .env.*
 !.env.example
 data/
+backend/zedu.db
+backend/zedu.db-*
 logs/
 backup/
 dist/
@@ -13,6 +15,7 @@ frontend/node_modules/
 frontend/dist/
 backend/bin/
 coverage/
+frontend/coverage/
 
 # Local agent runtime (plans/specs remain tracked separately by policy)
 .omx/logs/
