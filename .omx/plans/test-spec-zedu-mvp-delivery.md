@@ -104,4 +104,3 @@ Given MVP 构建；When 扫描菜单、路由、OpenAPI、API 直链及 feature 
 - 三语矩阵100%；真实 Resend 仅批准测试收件箱 smoke 通过，自动测试使用 fake provider。
 - 暂定运营参数已确认或明确接受默认值。
 - Product Owner 完整演练并签字。
-

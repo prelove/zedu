@@ -1,6 +1,6 @@
 # OpenSpec 0.17 Legacy SHA-256 Manifest
 
-Generated: 2026-07-11T03:31:18.4758431Z
+Generated: 2026-07-11T03:39:51.4692386Z
 
 c5ca9efb739cfb407b301ac8790cb5130137d0caecf0fe9bf98f9064bea2c87b  changes/001-add-project-scaffold/design.md
 0efa8837436811b7a72d6eb3701fcb1d1aebbf4d07b1f36402756355e82b43d3  changes/001-add-project-scaffold/proposal.md
@@ -48,7 +48,7 @@ aaac0f923fe5974bbc15eb32d8923cc31cad4297ec035ce6e6fd91cb8433b178  changes/007-ad
 d7065cde136aca5cd18da774a10027e66ca85007bd30e89341abe07f61c38623  changes/010-add-notification-system/design.md
 729cc3515e909b3e450b75066766d948f65f048d8efdf6b6914ffdb25a74c456  changes/010-add-notification-system/proposal.md
 270605b4a5e02bbb73b444a92628a8688fc06da9752d7d9d45755c7d880261ea  changes/010-add-notification-system/specs/lesson-scheduling/spec.md
-803ed21063e3d5f4900f8fa120ee9ced003fec9953b1fed689161a631de8b05f  changes/010-add-notification-system/specs/notification/spec.md
+c6f74cd7ed10421159de4b1752a4bb980e0057eda36885aa0c3c7ca9ab0c38ee  changes/010-add-notification-system/specs/notification/spec.md
 effae0d406b4fd241f910c6b98dfb55277cf56c714981f628e42052df490e164  changes/010-add-notification-system/tasks.md
 58d4c8e44ac20e2a08bc2f72a3c2bee8d4707584dd7dbc465367cd41639b5321  changes/011-add-configurable-dictionaries/design.md
 a1ac7211d9422b0dc2f2490a3678b93fa23d1938ce7d6f1952708080bd7c5c77  changes/011-add-configurable-dictionaries/proposal.md
