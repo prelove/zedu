@@ -1,0 +1,5 @@
+CREATE TABLE IF NOT EXISTS foundation_seed (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    seeded_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
