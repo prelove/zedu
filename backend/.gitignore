@@ -1,0 +1,12 @@
+# Build artifacts
+/zedu-server
+/zedu-server.exe
+*.exe
+
+# Test artifacts
+*.test
+*.out
+
+# OS files
+.DS_Store
+Thumbs.db
