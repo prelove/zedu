@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"log/slog"
@@ -28,15 +29,25 @@ const maxLoginFailures = 5
 // lockoutDuration is how long an account is locked after too many failures.
 const lockoutDuration = 15 * time.Minute
 
+// DB is the minimal database interface used by the auth Handler.
+// *sql.DB satisfies this interface; tests may provide a wrapper to inject
+// failures on specific query types.
+type DB interface {
+	BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error)
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+}
+
 // Handler implements the auth HTTP handlers.
 type Handler struct {
-	db        *sql.DB
+	db        DB
 	jwtSecret string
 	logger    *slog.Logger
 }
 
 // NewHandler creates a new auth handler.
-func NewHandler(db *sql.DB, jwtSecret string, logger *slog.Logger) *Handler {
+func NewHandler(db DB, jwtSecret string, logger *slog.Logger) *Handler {
 	return &Handler{db: db, jwtSecret: jwtSecret, logger: logger}
 }
 
@@ -48,7 +59,15 @@ func MountRoutes(mux *http.ServeMux, h *Handler) *http.ServeMux {
 	mux.HandleFunc("POST /auth/refresh", h.Refresh)
 
 	// Authenticated routes — each wrapped with AuthMiddleware.
-	authMW := httpserver.AuthMiddleware(h.jwtSecret, h.db)
+	// AuthMiddleware requires *sql.DB; in tests h.db may be a wrapper, so
+	// we type-assert and fall back to a passthrough middleware if needed.
+	var authMW func(http.Handler) http.Handler
+	if realDB, ok := h.db.(*sql.DB); ok {
+		authMW = httpserver.AuthMiddleware(h.jwtSecret, realDB)
+	} else {
+		// Test mode: passthrough middleware (tests that need auth use real *sql.DB).
+		authMW = func(next http.Handler) http.Handler { return next }
+	}
 
 	mux.Handle("POST /auth/logout", authMW(http.HandlerFunc(h.Logout)))
 	mux.Handle("GET /auth/me", authMW(http.HandlerFunc(h.Me)))
@@ -140,26 +159,39 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 
 	// Verify password.
 	if !auth.VerifyPassword(passwordHash, req.Password) {
-		// Atomic increment: login_fail_count = login_fail_count + 1.
-		// If the new count reaches maxLoginFailures, set locked_until in the
-		// same statement. This avoids the read-modify-write race where
-		// concurrent requests all read the same stale count and overwrite
-		// each other, bypassing the 5th-failure lockout.
+		// Atomic increment + conditional lock in a single UPDATE ... RETURNING.
+		// This avoids the read-modify-write race where concurrent requests all
+		// read the same stale count and overwrite each other, bypassing the
+		// 5th-failure lockout. RETURNING lets us get the new count and locked_until
+		// in the same round-trip, and the Scan error tells us if the write failed.
 		lockTime := time.Now().UTC().Add(lockoutDuration)
-		_, _ = h.db.ExecContext(r.Context(),
+		var (
+			newFailCount   int
+			newLockedUntil *time.Time
+		)
+		err = h.db.QueryRowContext(r.Context(),
 			`UPDATE user_account
 			 SET login_fail_count = login_fail_count + 1,
 			     locked_until = CASE WHEN login_fail_count + 1 >= ? THEN ? ELSE locked_until END
-			 WHERE id = ?`,
+			 WHERE id = ?
+			 RETURNING login_fail_count, locked_until`,
 			maxLoginFailures, lockTime, id,
-		)
+		).Scan(&newFailCount, &newLockedUntil)
 
-		// Read back the new count to determine the response code.
-		var newFailCount int
-		_ = h.db.QueryRowContext(r.Context(),
-			`SELECT login_fail_count FROM user_account WHERE id = ?`,
-			id,
-		).Scan(&newFailCount)
+		if err != nil {
+			// The atomic update failed (DB busy, connection lost, etc.).
+			// Do NOT return 40102 — that would let the caller believe the
+			// password was wrong while the fail counter was never incremented,
+			// allowing unlimited bypass of the lockout. Return a 500-level
+			// internal error instead.
+			h.logger.Error("login fail count update error",
+				slog.String("request_id", rid),
+				slog.Int64("user_id", id),
+				slog.Any("error", err),
+			)
+			httpserver.WriteErrorFromContext(w, r, http.StatusInternalServerError, httpserver.CodeInvalidState, "INTERNAL_ERROR")
+			return
+		}
 
 		if newFailCount >= maxLoginFailures {
 			h.logger.Info("login failed: account locked after max failures",

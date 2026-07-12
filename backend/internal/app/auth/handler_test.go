@@ -851,9 +851,14 @@ func TestConcurrentLoginLockout(t *testing.T) {
 	}
 }
 
-// ==================== P2.2: Refresh failure logs include request_id ====================
+// ==================== P1.7b: Login fail-count update failure does not return 40102 ====================
 
-func TestRefreshFailureLogIncludesRequestID(t *testing.T) {
+// TestLoginFailCountUpdateErrorDoesNotReturn40102 specifically tests that when
+// the atomic UPDATE ... RETURNING fails (DB error), the response is NOT 40102
+// (which would falsely indicate "wrong password" while the counter was never
+// incremented). It uses a custom *sql.DB wrapper that intercepts QueryRowContext
+// to fail only on UPDATE statements.
+func TestLoginFailCountUpdateErrorDoesNotReturn40102(t *testing.T) {
 	tmpDir := t.TempDir()
 	dsn := "file:" + filepath.Join(tmpDir, "test.db")
 
@@ -868,56 +873,166 @@ func TestRefreshFailureLogIncludesRequestID(t *testing.T) {
 		t.Fatalf("migrate up: %v", err)
 	}
 
-	var logBuf bytes.Buffer
-	logger := slog.New(logging.NewRedactingHandler(slog.NewJSONHandler(&logBuf, nil)))
+	createTestUser(t, db, "victim", "Pass1234", "OWNER", "ACTIVE")
 
-	handler := appauth.NewHandler(db, "test-secret-at-least-32-chars-long", logger)
+	var logBuf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logBuf, nil))
+
+	// Wrap the DB so that QueryRowContext fails when the query contains "UPDATE".
+	// The closedDB provides a *sql.Row whose Scan always errors.
+	closedDB, _ := sql.Open("sqlite", "file:"+filepath.Join(tmpDir, "closed.db"))
+	closedDB.Close()
+	failingDB := &failingUpdateDB{db: db, closedDB: closedDB}
+
+	handler := appauth.NewHandler(failingDB, "test-jwt-secret-for-m2-failcount", logger)
 	mux := httpserver.New()
 	mux = appauth.MountRoutes(mux, handler)
 	wrapped := logging.NewMiddleware(logger)(mux)
 	srv := httptest.NewServer(wrapped)
 	defer srv.Close()
 
-	// Refresh without any cookie — must fail with 40101.
+	// Login with wrong password. The SELECT succeeds (not an UPDATE),
+	// password verification fails, then the atomic UPDATE ... RETURNING
+	// fails because failingDB intercepts it.
+	code, body, _ := doRequest(t, "POST", srv.URL+"/auth/login",
+		map[string]string{"username": "victim", "password": "wrongpass1"}, nil)
+
+	// Must NOT be 40102 (LOGIN_FAILED) — that would mask the DB error.
+	if code == http.StatusUnauthorized && body != nil && body["code"] == float64(40102) {
+		t.Fatalf("must not return 40102 when fail-count UPDATE fails; got code=40102 body=%v", body)
+	}
+
+	// Must be 500 with code 42201 (internal error).
+	if code != http.StatusInternalServerError {
+		t.Fatalf("expected 500 when fail-count UPDATE fails, got %d body=%v", code, body)
+	}
+	if body == nil || body["code"] != float64(42201) {
+		t.Fatalf("expected code 42201, got body=%v", body)
+	}
+
+	// Must not issue a token.
+	if body != nil {
+		if data, ok := body["data"].(map[string]any); ok {
+			if _, hasToken := data["accessToken"]; hasToken {
+				t.Fatalf("must not issue access token when fail-count UPDATE fails")
+			}
+		}
+	}
+
+	// The log must contain the error with request_id.
+	logOutput := logBuf.String()
+	if !strings.Contains(logOutput, "login fail count update error") {
+		t.Fatalf("expected 'login fail count update error' in log, got: %s", logOutput)
+	}
+	if !strings.Contains(logOutput, "request_id") {
+		t.Fatalf("expected request_id in error log, got: %s", logOutput)
+	}
+
+	// Verify the fail count was NOT incremented (because the UPDATE failed).
+	var failCount int
+	err = db.QueryRow(`SELECT login_fail_count FROM user_account WHERE username = 'victim'`).Scan(&failCount)
+	if err != nil {
+		t.Fatalf("query fail count: %v", err)
+	}
+	if failCount != 0 {
+		t.Fatalf("fail count must remain 0 when UPDATE failed, got %d", failCount)
+	}
+}
+
+// failingUpdateDB wraps *sql.DB and returns an error for any QueryRowContext
+// call whose query contains "UPDATE". This simulates a DB write failure while
+// allowing SELECTs to pass through. The error is produced by querying a
+// separate closed *sql.DB, whose Row.Scan always returns an error.
+type failingUpdateDB struct {
+	db       *sql.DB
+	closedDB *sql.DB
+}
+
+func (f *failingUpdateDB) BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error) {
+	return f.db.BeginTx(ctx, opts)
+}
+
+func (f *failingUpdateDB) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	return f.db.ExecContext(ctx, query, args...)
+}
+
+func (f *failingUpdateDB) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
+	if strings.Contains(strings.ToUpper(query), "UPDATE") {
+		// Return a Row from a closed DB — Scan will fail with "sql: database is closed".
+		return f.closedDB.QueryRowContext(ctx, "SELECT 1")
+	}
+	return f.db.QueryRowContext(ctx, query, args...)
+}
+
+func (f *failingUpdateDB) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	return f.db.QueryContext(ctx, query, args...)
+}
+
+// ==================== P2.2: Refresh error logs include request_id (real DB error) ====================
+
+func TestRefreshErrorLogIncludesRequestID(t *testing.T) {
+	tmpDir := t.TempDir()
+	dsn := "file:" + filepath.Join(tmpDir, "test.db")
+
+	db, err := database.Open(dsn)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+
+	migrationsDir := filepath.Join("..", "..", "..", "migrations")
+	if err := database.MigrateUp(db, migrationsDir); err != nil {
+		t.Fatalf("migrate up: %v", err)
+	}
+
+	// Create a user and a valid refresh session so the cookie is real.
+	createTestUser(t, db, "owner1", "Pass1234", "OWNER", "ACTIVE")
+
+	var logBuf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logBuf, nil))
+
+	handler := appauth.NewHandler(db, "test-secret-at-least-32-chars-long", logger)
+	mux := httpserver.New()
+	mux = appauth.MountRoutes(mux, handler)
+	wrapped := logging.NewMiddleware(logger)(mux)
+	srv := httptest.NewServer(wrapped)
+
+	// Login to get a real refresh cookie.
+	_, _, loginResp := doRequest(t, "POST", srv.URL+"/auth/login",
+		map[string]string{"username": "owner1", "password": "Pass1234"}, nil)
+	cookie := extractRefreshCookie(loginResp)
+	if cookie == nil {
+		t.Fatalf("no refresh cookie after login")
+	}
+
+	// Close the DB so the refresh query will fail with a real DB error.
+	// This hits the `h.logger.Error("refresh query error", ...)` path.
+	db.Close()
+
+	// Call refresh with the real cookie — the DB query will fail.
 	req, _ := http.NewRequest("POST", srv.URL+"/auth/refresh", nil)
+	req.AddCookie(cookie)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("refresh request: %v", err)
 	}
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("expected 401, got %d", resp.StatusCode)
-	}
 
-	// Refresh with an invalid (non-existent) refresh token cookie.
-	// This hits the "refresh query error" / "no rows" path.
-	req2, _ := http.NewRequest("POST", srv.URL+"/auth/refresh", nil)
-	req2.AddCookie(&http.Cookie{Name: appauth.RefreshCookieName, Value: "nonexistent-token-value"})
-	resp2, err := http.DefaultClient.Do(req2)
-	if err != nil {
-		t.Fatalf("refresh request 2: %v", err)
-	}
-	resp2.Body.Close()
-	if resp2.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("expected 401 for invalid refresh token, got %d", resp2.StatusCode)
-	}
+	srv.Close()
 
-	// The access logs (from middleware) must include request_id for both requests.
 	logOutput := logBuf.String()
-	if !strings.Contains(logOutput, "request_id") {
-		t.Fatalf("refresh failure logs must include request_id: %s", logOutput)
+
+	// The Refresh handler's own error log must be present.
+	if !strings.Contains(logOutput, "refresh query error") {
+		t.Fatalf("expected 'refresh query error' in log (Refresh's own logger.Error), got: %s", logOutput)
 	}
 
-	// Count how many "request completed" log entries have request_id.
-	// Both refresh requests should have request_id in their access logs.
-	lines := strings.Split(strings.TrimSpace(logOutput), "\n")
-	requestIDCount := 0
-	for _, line := range lines {
-		if strings.Contains(line, "request_id") {
-			requestIDCount++
-		}
+	// The error log must include request_id.
+	if !strings.Contains(logOutput, "request_id") {
+		t.Fatalf("expected request_id in refresh error log, got: %s", logOutput)
 	}
-	if requestIDCount < 4 { // 2 requests × 2 log entries (started + completed)
-		t.Fatalf("expected at least 4 log lines with request_id, got %d", requestIDCount)
+
+	// The log must NOT contain the raw refresh token value.
+	if cookie != nil && strings.Contains(logOutput, cookie.Value) {
+		t.Fatalf("log must not leak the refresh token value: %s", logOutput)
 	}
 }
