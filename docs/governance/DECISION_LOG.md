@@ -8,6 +8,7 @@
 | ADR-004 | 2026-07-11 | 旧 OpenSpec 冻结，按业务能力迁移到 1.6 | ACCEPTED | PM/Architect | M0 |
 | ADR-005 | 2026-07-11 | 通知使用 SQLite outbox-lite；供应商接受不等于送达 | ACCEPTED | PM/Architect | M4b |
 | ADR-006 | 2026-07-11 | 7天是目标，不得越过质量门禁 | ACCEPTED | Product Owner | 每周 |
+| ADR-007 | 2026-07-12 | 学生邮箱为选填；填写时全局唯一，重复一律以40901拒绝，不提供“仍然新建” | ACCEPTED | Product Owner | M2验收 |
 
 ## 暂定运营参数
 

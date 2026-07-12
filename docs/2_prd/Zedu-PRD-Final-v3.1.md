@@ -1,7 +1,7 @@
 # Zedu 轻量级教培教务管理系统
 ## 产品需求文档（PRD）— 正式定案版
 
-> **文档版本**：v3.1（Final / MVP范围修订版）
+> **文档版本**：v3.1-r1（Final / MVP范围修订版；含 2026-07-12 学生邮箱唯一性决策）
 > **状态**：正式定案，作为后续所有开发、设计、测试工作的唯一依据
 > **整理日期**：2026-07-04
 > **项目代号**：Zedu（Zero-friction Education）
@@ -466,7 +466,7 @@ JLPT等级：入门 → N5 → N4 → N3 → N2 → N1
 
 | 情况 | 处理方式 |
 |---|---|
-| 邮箱与已有学生重复 | 提示"该邮箱已存在学生：XXX"，可选择"仍然新建"（双胞胎等情况）或跳转已有学生 |
+| 邮箱与已有学生重复 | 阻止创建或更新，返回`40901`并提示已有学生；不得提供“仍然新建”绕过路径 |
 | 学生暂无邮箱 | 允许保存，但明确提示"未填写邮箱，将无法接收自动提醒" |
 | 课程方向下暂无合适老师 | 允许先创建报名项目、暂不指定老师，排课时若无老师则不允许创建课次 |
 | 试听转正式 | `enrollment_type`从TRIAL改为ONE_TO_ONE，历史课次不受影响 |
@@ -723,7 +723,7 @@ CREATE TABLE user_account (
   password_hash TEXT NOT NULL,
   role TEXT NOT NULL CHECK(role IN ('OWNER','OPERATOR')),
   display_name TEXT NOT NULL,
-  email TEXT,
+  email TEXT UNIQUE,
   status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK(status IN ('ACTIVE','DISABLED')),
   last_login_at DATETIME,
   login_fail_count INTEGER NOT NULL DEFAULT 0,
@@ -843,7 +843,6 @@ CREATE TABLE student (
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   deleted_at DATETIME
 );
-CREATE INDEX idx_student_email ON student(email);
 CREATE INDEX idx_student_status ON student(status);
 CREATE INDEX idx_student_name ON student(name);
 
@@ -1564,7 +1563,7 @@ GET /healthz   { "status": "ok", "version": "3.0.0", "uptime": 12345 }
 | 字段 | 规则 |
 |---|---|
 | student.name | 必填，1~50字符 |
-| student.email | 选填，标准邮箱格式 |
+| student.email | 选填，标准邮箱格式；填写时全局唯一，重复返回40901 |
 | teacher.default_rate_amount | 必填，≥0整数 |
 | enrollment.charge_per_lesson_amount | 必填，≥0整数 |
 | lesson.duration_min | 必填，10~480之间整数 |
@@ -2307,9 +2306,10 @@ V2   （远期）      多端登录/家长通知/小班课/支付API/AI辅助
 | v2.2 | 2026-07-04 | Codex业务配置化收敛版，确立五大设计原则和三层定价模型 |
 | v3.0 | 2026-07-04 | 正式定案版，融合v2.0技术深度与v2.2业务原则，重写完整DDL/API/UI规格以贯彻配置化原则，作为唯一权威文档 |
 | v3.1 | 2026-07-11 | 调整MVP边界：Resend通知与付款凭证前移；正式老师结款留在V1；增加分阶段闭环、附件备份恢复及无结款入口门禁 |
+| v3.1-r1 | 2026-07-12 | 产品决策：学生邮箱填写时必须唯一；删除重复邮箱的“仍然新建”分支，统一以40901拒绝冲突写入 |
 
 ---
 
-*Zedu PRD v3.1（MVP范围修订版）· 更新日期 2026-07-11*
+*Zedu PRD v3.1-r1（MVP范围修订版）· 更新日期 2026-07-12*
 
 *本文档是Zedu项目的唯一事实文档。后续所有开发、设计、测试工作均以此为准。若有变更需求，请直接在对应章节修订并更新附录D变更记录，不再另外维护并行的讨论稿。*
