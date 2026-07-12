@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/prelove/zedu/backend/internal/app/auth"
 	"github.com/prelove/zedu/backend/internal/platform/database"
 	"github.com/prelove/zedu/backend/internal/platform/httpserver"
 	"github.com/prelove/zedu/backend/internal/platform/logging"
@@ -41,6 +42,12 @@ func main() {
 	}
 
 	mux := httpserver.New()
+	jwtSecret := os.Getenv("ZEDU_JWT_SECRET")
+	if jwtSecret == "" {
+		jwtSecret = "dev-only-change-me-in-production"
+	}
+	authHandler := auth.NewHandler(db, jwtSecret, logger)
+	mux = auth.MountRoutes(mux, authHandler)
 	handler := logging.NewMiddleware(logger)(mux)
 
 	port := os.Getenv("PORT")
