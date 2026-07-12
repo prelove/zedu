@@ -87,13 +87,12 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		passwordHash string
 		role         string
 		status       string
-		failCount    int
 		lockedUntil  *time.Time
 	)
 	err := h.db.QueryRowContext(r.Context(),
-		`SELECT id, password_hash, role, status, login_fail_count, locked_until FROM user_account WHERE username = ?`,
+		`SELECT id, password_hash, role, status, locked_until FROM user_account WHERE username = ?`,
 		req.Username,
-	).Scan(&id, &passwordHash, &role, &status, &failCount, &lockedUntil)
+	).Scan(&id, &passwordHash, &role, &status, &lockedUntil)
 
 	// Same error for unknown user and wrong password — do not disclose account existence.
 	authFailedCode := httpserver.CodeLoginFailed
@@ -141,19 +140,37 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 
 	// Verify password.
 	if !auth.VerifyPassword(passwordHash, req.Password) {
-		newFailCount := failCount + 1
+		// Atomic increment: login_fail_count = login_fail_count + 1.
+		// If the new count reaches maxLoginFailures, set locked_until in the
+		// same statement. This avoids the read-modify-write race where
+		// concurrent requests all read the same stale count and overwrite
+		// each other, bypassing the 5th-failure lockout.
+		lockTime := time.Now().UTC().Add(lockoutDuration)
+		_, _ = h.db.ExecContext(r.Context(),
+			`UPDATE user_account
+			 SET login_fail_count = login_fail_count + 1,
+			     locked_until = CASE WHEN login_fail_count + 1 >= ? THEN ? ELSE locked_until END
+			 WHERE id = ?`,
+			maxLoginFailures, lockTime, id,
+		)
+
+		// Read back the new count to determine the response code.
+		var newFailCount int
+		_ = h.db.QueryRowContext(r.Context(),
+			`SELECT login_fail_count FROM user_account WHERE id = ?`,
+			id,
+		).Scan(&newFailCount)
+
 		if newFailCount >= maxLoginFailures {
-			lockTime := time.Now().UTC().Add(lockoutDuration)
-			_, _ = h.db.ExecContext(r.Context(),
-				`UPDATE user_account SET login_fail_count = ?, locked_until = ? WHERE id = ?`,
-				newFailCount, lockTime, id,
+			h.logger.Info("login failed: account locked after max failures",
+				slog.String("request_id", rid),
+				slog.Int64("user_id", id),
+				slog.Int("fail_count", newFailCount),
 			)
-		} else {
-			_, _ = h.db.ExecContext(r.Context(),
-				`UPDATE user_account SET login_fail_count = ? WHERE id = ?`,
-				newFailCount, id,
-			)
+			httpserver.WriteErrorFromContext(w, r, http.StatusUnauthorized, httpserver.CodeLocked, "ACCOUNT_LOCKED")
+			return
 		}
+
 		h.logger.Info("login failed: wrong password",
 			slog.String("request_id", rid),
 			slog.Int64("user_id", id),
@@ -235,6 +252,8 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 // and insert new session in one BeginTx. Concurrent requests with the same
 // token will see rows-affected=0 on the conditional UPDATE and be rejected.
 func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
+	rid := httpserver.RequestIDFromContext(r.Context())
+
 	cookie, err := r.Cookie(RefreshCookieName)
 	if err != nil {
 		httpserver.WriteErrorFromContext(w, r, http.StatusUnauthorized, httpserver.CodeUnauth, "AUTH_REQUIRED")
@@ -266,7 +285,10 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		h.logger.Error("refresh query error", slog.Any("error", err))
+		h.logger.Error("refresh query error",
+			slog.String("request_id", rid),
+			slog.Any("error", err),
+		)
 		httpserver.WriteErrorFromContext(w, r, http.StatusUnauthorized, httpserver.CodeUnauth, "AUTH_REQUIRED")
 		return
 	}
@@ -306,7 +328,10 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 	// Atomic rotation: single transaction.
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
-		h.logger.Error("begin tx for refresh rotation", slog.Any("error", err))
+		h.logger.Error("begin tx for refresh rotation",
+			slog.String("request_id", rid),
+			slog.Any("error", err),
+		)
 		httpserver.WriteErrorFromContext(w, r, http.StatusInternalServerError, httpserver.CodeUnauth, "AUTH_REQUIRED")
 		return
 	}
@@ -319,7 +344,10 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 	)
 	if err != nil {
 		_ = tx.Rollback()
-		h.logger.Error("revoke old session in tx", slog.Any("error", err))
+		h.logger.Error("revoke old session in tx",
+			slog.String("request_id", rid),
+			slog.Any("error", err),
+		)
 		httpserver.WriteErrorFromContext(w, r, http.StatusInternalServerError, httpserver.CodeUnauth, "AUTH_REQUIRED")
 		return
 	}
@@ -338,13 +366,19 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 	)
 	if err != nil {
 		_ = tx.Rollback()
-		h.logger.Error("insert new session in tx", slog.Any("error", err))
+		h.logger.Error("insert new session in tx",
+			slog.String("request_id", rid),
+			slog.Any("error", err),
+		)
 		httpserver.WriteErrorFromContext(w, r, http.StatusInternalServerError, httpserver.CodeUnauth, "AUTH_REQUIRED")
 		return
 	}
 
 	if err := tx.Commit(); err != nil {
-		h.logger.Error("commit refresh rotation", slog.Any("error", err))
+		h.logger.Error("commit refresh rotation",
+			slog.String("request_id", rid),
+			slog.Any("error", err),
+		)
 		httpserver.WriteErrorFromContext(w, r, http.StatusInternalServerError, httpserver.CodeUnauth, "AUTH_REQUIRED")
 		return
 	}

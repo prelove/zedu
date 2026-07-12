@@ -223,8 +223,8 @@ func TestLoginLockoutAfterFiveFailures(t *testing.T) {
 	ts := newTestServer(t)
 	createTestUser(t, ts.db, "owner1", "Pass1234", "OWNER", "ACTIVE")
 
-	// Five failed login attempts.
-	for i := 0; i < 5; i++ {
+	// First 4 failed attempts return 40102 (wrong password, not yet locked).
+	for i := 0; i < 4; i++ {
 		code, body, _ := doRequest(t, "POST", ts.srv.URL+"/auth/login",
 			map[string]string{"username": "owner1", "password": "wrong"}, nil)
 		if code != http.StatusUnauthorized {
@@ -235,8 +235,18 @@ func TestLoginLockoutAfterFiveFailures(t *testing.T) {
 		}
 	}
 
-	// Sixth attempt must be locked.
+	// 5th failed attempt triggers the lock and returns 40103 (account locked).
 	code, body, _ := doRequest(t, "POST", ts.srv.URL+"/auth/login",
+		map[string]string{"username": "owner1", "password": "wrong"}, nil)
+	if code != http.StatusUnauthorized {
+		t.Fatalf("attempt 5: expected 401, got %d", code)
+	}
+	if body["code"] != float64(40103) {
+		t.Fatalf("attempt 5: expected code 40103 (locked), got %v", body["code"])
+	}
+
+	// Sixth attempt (even with correct password) must be locked.
+	code, body, _ = doRequest(t, "POST", ts.srv.URL+"/auth/login",
 		map[string]string{"username": "owner1", "password": "Pass1234"}, nil)
 	if code != http.StatusUnauthorized {
 		t.Fatalf("expected 401 for locked account, got %d", code)
@@ -724,5 +734,190 @@ func TestValidateSecretFailsOnEmpty(t *testing.T) {
 	}
 	if err := auth.ValidateSecret("short"); err == nil {
 		t.Fatalf("ValidateSecret must fail on short secret")
+	}
+}
+
+// ==================== P1.7: Concurrent login lockout regression ====================
+
+// newConcurrentTestServer creates a test server with MaxOpenConns > 1 so that
+// concurrent HTTP requests can execute DB operations in parallel.
+// PRAGMAs are set via DSN query parameters so every pooled connection inherits them.
+func newConcurrentTestServer(t *testing.T) *testServer {
+	t.Helper()
+	tmpDir := t.TempDir()
+	dsn := "file:" + filepath.Join(tmpDir, "test.db") +
+		"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)"
+
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	db.SetMaxOpenConns(10)
+
+	migrationsDir := filepath.Join("..", "..", "..", "migrations")
+	if err := database.MigrateUp(db, migrationsDir); err != nil {
+		t.Fatalf("migrate up: %v", err)
+	}
+
+	jwtSec := "test-jwt-secret-for-m2-concurrent"
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+
+	handler := appauth.NewHandler(db, jwtSec, logger)
+	mux := httpserver.New()
+	mux = appauth.MountRoutes(mux, handler)
+	wrapped := logging.NewMiddleware(logger)(mux)
+
+	srv := httptest.NewServer(wrapped)
+
+	ts := &testServer{db: db, srv: srv, jwtSec: jwtSec, handler: wrapped}
+	t.Cleanup(func() {
+		srv.Close()
+		db.Close()
+	})
+	return ts
+}
+
+func TestConcurrentLoginLockout(t *testing.T) {
+	ts := newConcurrentTestServer(t)
+	createTestUser(t, ts.db, "victim", "Pass1234", "OWNER", "ACTIVE")
+
+	// Fire 5 concurrent wrong-password login requests.
+	const goroutines = 5
+	var wg sync.WaitGroup
+	type result struct {
+		statusCode int
+		code       float64
+	}
+	results := make([]result, goroutines)
+
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			req, _ := http.NewRequest("POST", ts.srv.URL+"/auth/login",
+				bytes.NewReader([]byte(`{"username":"victim","password":"wrongpass1"}`)))
+			req.Header.Set("Content-Type", "application/json")
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				results[idx] = result{statusCode: 0, code: 0}
+				return
+			}
+			defer resp.Body.Close()
+			data, _ := io.ReadAll(resp.Body)
+			var parsed map[string]any
+			_ = json.Unmarshal(data, &parsed)
+			code, _ := parsed["code"].(float64)
+			results[idx] = result{statusCode: resp.StatusCode, code: code}
+		}(i)
+	}
+	wg.Wait()
+
+	// All 5 should return 401 (either 40102 or 40103 for the one that triggers lockout).
+	for i, r := range results {
+		if r.statusCode != http.StatusUnauthorized {
+			t.Fatalf("request %d: expected 401, got %d", i, r.statusCode)
+		}
+		if r.code != float64(40102) && r.code != float64(40103) {
+			t.Fatalf("request %d: expected code 40102 or 40103, got %v", i, r.code)
+		}
+	}
+
+	// Verify the account is now locked: login_fail_count must be exactly 5
+	// and locked_until must be set.
+	var failCount int
+	var lockedUntil *time.Time
+	err := ts.db.QueryRow(
+		`SELECT login_fail_count, locked_until FROM user_account WHERE username = 'victim'`,
+	).Scan(&failCount, &lockedUntil)
+	if err != nil {
+		t.Fatalf("query user: %v", err)
+	}
+	if failCount != goroutines {
+		t.Fatalf("expected login_fail_count=%d, got %d", goroutines, failCount)
+	}
+	if lockedUntil == nil {
+		t.Fatalf("expected locked_until to be set after %d concurrent failures", goroutines)
+	}
+
+	// A subsequent login with the CORRECT password must still be rejected
+	// with 40103 (account locked).
+	code, body, _ := doRequest(t, "POST", ts.srv.URL+"/auth/login",
+		map[string]string{"username": "victim", "password": "Pass1234"}, nil)
+	if code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for locked account, got %d", code)
+	}
+	if body["code"] != float64(40103) {
+		t.Fatalf("expected code 40103 for locked account, got %v", body["code"])
+	}
+}
+
+// ==================== P2.2: Refresh failure logs include request_id ====================
+
+func TestRefreshFailureLogIncludesRequestID(t *testing.T) {
+	tmpDir := t.TempDir()
+	dsn := "file:" + filepath.Join(tmpDir, "test.db")
+
+	db, err := database.Open(dsn)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	migrationsDir := filepath.Join("..", "..", "..", "migrations")
+	if err := database.MigrateUp(db, migrationsDir); err != nil {
+		t.Fatalf("migrate up: %v", err)
+	}
+
+	var logBuf bytes.Buffer
+	logger := slog.New(logging.NewRedactingHandler(slog.NewJSONHandler(&logBuf, nil)))
+
+	handler := appauth.NewHandler(db, "test-secret-at-least-32-chars-long", logger)
+	mux := httpserver.New()
+	mux = appauth.MountRoutes(mux, handler)
+	wrapped := logging.NewMiddleware(logger)(mux)
+	srv := httptest.NewServer(wrapped)
+	defer srv.Close()
+
+	// Refresh without any cookie — must fail with 40101.
+	req, _ := http.NewRequest("POST", srv.URL+"/auth/refresh", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("refresh request: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", resp.StatusCode)
+	}
+
+	// Refresh with an invalid (non-existent) refresh token cookie.
+	// This hits the "refresh query error" / "no rows" path.
+	req2, _ := http.NewRequest("POST", srv.URL+"/auth/refresh", nil)
+	req2.AddCookie(&http.Cookie{Name: appauth.RefreshCookieName, Value: "nonexistent-token-value"})
+	resp2, err := http.DefaultClient.Do(req2)
+	if err != nil {
+		t.Fatalf("refresh request 2: %v", err)
+	}
+	resp2.Body.Close()
+	if resp2.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for invalid refresh token, got %d", resp2.StatusCode)
+	}
+
+	// The access logs (from middleware) must include request_id for both requests.
+	logOutput := logBuf.String()
+	if !strings.Contains(logOutput, "request_id") {
+		t.Fatalf("refresh failure logs must include request_id: %s", logOutput)
+	}
+
+	// Count how many "request completed" log entries have request_id.
+	// Both refresh requests should have request_id in their access logs.
+	lines := strings.Split(strings.TrimSpace(logOutput), "\n")
+	requestIDCount := 0
+	for _, line := range lines {
+		if strings.Contains(line, "request_id") {
+			requestIDCount++
+		}
+	}
+	if requestIDCount < 4 { // 2 requests × 2 log entries (started + completed)
+		t.Fatalf("expected at least 4 log lines with request_id, got %d", requestIDCount)
 	}
 }
