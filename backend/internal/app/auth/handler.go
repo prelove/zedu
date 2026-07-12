@@ -52,22 +52,16 @@ func NewHandler(db DB, jwtSecret string, logger *slog.Logger) *Handler {
 }
 
 // MountRoutes mounts auth routes onto the given mux. It returns the mux
-// so callers can chain further route mounting.
-func MountRoutes(mux *http.ServeMux, h *Handler) *http.ServeMux {
+// so callers can chain further route mounting. authDB is the real *sql.DB
+// used by AuthMiddleware to confirm account status on every protected request;
+// it must not be nil and must not be a test wrapper.
+func MountRoutes(mux *http.ServeMux, h *Handler, authDB *sql.DB) *http.ServeMux {
 	// Public routes (no auth middleware).
 	mux.HandleFunc("POST /auth/login", h.Login)
 	mux.HandleFunc("POST /auth/refresh", h.Refresh)
 
 	// Authenticated routes — each wrapped with AuthMiddleware.
-	// AuthMiddleware requires *sql.DB; in tests h.db may be a wrapper, so
-	// we type-assert and fall back to a passthrough middleware if needed.
-	var authMW func(http.Handler) http.Handler
-	if realDB, ok := h.db.(*sql.DB); ok {
-		authMW = httpserver.AuthMiddleware(h.jwtSecret, realDB)
-	} else {
-		// Test mode: passthrough middleware (tests that need auth use real *sql.DB).
-		authMW = func(next http.Handler) http.Handler { return next }
-	}
+	authMW := httpserver.AuthMiddleware(h.jwtSecret, authDB)
 
 	mux.Handle("POST /auth/logout", authMW(http.HandlerFunc(h.Logout)))
 	mux.Handle("GET /auth/me", authMW(http.HandlerFunc(h.Me)))

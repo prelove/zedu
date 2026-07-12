@@ -49,7 +49,7 @@ func main() {
 		os.Exit(1)
 	}
 	authHandler := appauth.NewHandler(db, jwtSecret, logger)
-	mux = appauth.MountRoutes(mux, authHandler)
+	mux = appauth.MountRoutes(mux, authHandler, db)
 	handler := logging.NewMiddleware(logger)(mux)
 
 	port := os.Getenv("PORT")

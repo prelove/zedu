@@ -51,7 +51,7 @@ func newTestServer(t *testing.T) *testServer {
 
 	handler := appauth.NewHandler(db, jwtSec, logger)
 	mux := httpserver.New()
-	mux = appauth.MountRoutes(mux, handler)
+	mux = appauth.MountRoutes(mux, handler, db)
 	wrapped := logging.NewMiddleware(logger)(mux)
 
 	srv := httptest.NewServer(wrapped)
@@ -485,7 +485,7 @@ func TestLoginLogDoesNotLeakPasswordOrToken(t *testing.T) {
 
 	handler := appauth.NewHandler(db, "test-secret", logger)
 	mux := httpserver.New()
-	mux = appauth.MountRoutes(mux, handler)
+	mux = appauth.MountRoutes(mux, handler, db)
 	wrapped := logging.NewMiddleware(logger)(mux)
 	srv := httptest.NewServer(wrapped)
 	defer srv.Close()
@@ -704,7 +704,7 @@ func TestLoginLogIncludesRequestIDAndNoUsernameForUnknownUser(t *testing.T) {
 
 	handler := appauth.NewHandler(db, "test-secret-at-least-32-chars", logger)
 	mux := httpserver.New()
-	mux = appauth.MountRoutes(mux, handler)
+	mux = appauth.MountRoutes(mux, handler, db)
 	wrapped := logging.NewMiddleware(logger)(mux)
 	srv := httptest.NewServer(wrapped)
 	defer srv.Close()
@@ -764,7 +764,7 @@ func newConcurrentTestServer(t *testing.T) *testServer {
 
 	handler := appauth.NewHandler(db, jwtSec, logger)
 	mux := httpserver.New()
-	mux = appauth.MountRoutes(mux, handler)
+	mux = appauth.MountRoutes(mux, handler, db)
 	wrapped := logging.NewMiddleware(logger)(mux)
 
 	srv := httptest.NewServer(wrapped)
@@ -886,7 +886,7 @@ func TestLoginFailCountUpdateErrorDoesNotReturn40102(t *testing.T) {
 
 	handler := appauth.NewHandler(failingDB, "test-jwt-secret-for-m2-failcount", logger)
 	mux := httpserver.New()
-	mux = appauth.MountRoutes(mux, handler)
+	mux = appauth.MountRoutes(mux, handler, db)
 	wrapped := logging.NewMiddleware(logger)(mux)
 	srv := httptest.NewServer(wrapped)
 	defer srv.Close()
@@ -992,7 +992,7 @@ func TestRefreshErrorLogIncludesRequestID(t *testing.T) {
 
 	handler := appauth.NewHandler(db, "test-secret-at-least-32-chars-long", logger)
 	mux := httpserver.New()
-	mux = appauth.MountRoutes(mux, handler)
+	mux = appauth.MountRoutes(mux, handler, db)
 	wrapped := logging.NewMiddleware(logger)(mux)
 	srv := httptest.NewServer(wrapped)
 
@@ -1035,4 +1035,182 @@ func TestRefreshErrorLogIncludesRequestID(t *testing.T) {
 	if cookie != nil && strings.Contains(logOutput, cookie.Value) {
 		t.Fatalf("log must not leak the refresh token value: %s", logOutput)
 	}
+}
+
+// ==================== r4: Auth bypass removal regression tests ====================
+
+// TestAuthBypassRemovedFailingDBRejectsUnauthenticatedME verifies that when
+// the Handler uses a failingUpdateDB wrapper for business SQL, the AuthMiddleware
+// still uses the real *sql.DB passed to MountRoutes and rejects unauthenticated
+// requests to GET /auth/me with 401 / 40101.
+func TestAuthBypassRemovedFailingDBRejectsUnauthenticatedME(t *testing.T) {
+	tmpDir := t.TempDir()
+	dsn := "file:" + filepath.Join(tmpDir, "test.db")
+
+	db, err := database.Open(dsn)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	migrationsDir := filepath.Join("..", "..", "..", "migrations")
+	if err := database.MigrateUp(db, migrationsDir); err != nil {
+		t.Fatalf("migrate up: %v", err)
+	}
+
+	createTestUser(t, db, "owner1", "Pass1234", "OWNER", "ACTIVE")
+
+	closedDB, _ := sql.Open("sqlite", "file:"+filepath.Join(tmpDir, "closed.db"))
+	closedDB.Close()
+	failingDB := &failingUpdateDB{db: db, closedDB: closedDB}
+
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	handler := appauth.NewHandler(failingDB, "test-jwt-secret-for-r4", logger)
+	mux := httpserver.New()
+	// Pass the REAL db to MountRoutes for AuthMiddleware.
+	mux = appauth.MountRoutes(mux, handler, db)
+	wrapped := logging.NewMiddleware(logger)(mux)
+	srv := httptest.NewServer(wrapped)
+	defer srv.Close()
+
+	// No Authorization header → must get 401 / 40101.
+	req, _ := http.NewRequest("GET", srv.URL+"/auth/me", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET /auth/me: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for unauthenticated GET /auth/me, got %d", resp.StatusCode)
+	}
+	data, _ := io.ReadAll(resp.Body)
+	var body map[string]any
+	_ = json.Unmarshal(data, &body)
+	if body["code"] != float64(40101) {
+		t.Fatalf("expected code 40101, got %v", body["code"])
+	}
+}
+
+// TestAuthBypassRemovedFailingDBRejectsUnauthenticatedUsers verifies that when
+// the Handler uses a failingUpdateDB wrapper for business SQL, the AuthMiddleware
+// still uses the real *sql.DB passed to MountRoutes and rejects unauthenticated
+// requests to GET /users with 401 / 40101.
+func TestAuthBypassRemovedFailingDBRejectsUnauthenticatedUsers(t *testing.T) {
+	tmpDir := t.TempDir()
+	dsn := "file:" + filepath.Join(tmpDir, "test.db")
+
+	db, err := database.Open(dsn)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	migrationsDir := filepath.Join("..", "..", "..", "migrations")
+	if err := database.MigrateUp(db, migrationsDir); err != nil {
+		t.Fatalf("migrate up: %v", err)
+	}
+
+	createTestUser(t, db, "owner1", "Pass1234", "OWNER", "ACTIVE")
+
+	closedDB, _ := sql.Open("sqlite", "file:"+filepath.Join(tmpDir, "closed.db"))
+	closedDB.Close()
+	failingDB := &failingUpdateDB{db: db, closedDB: closedDB}
+
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	handler := appauth.NewHandler(failingDB, "test-jwt-secret-for-r4", logger)
+	mux := httpserver.New()
+	mux = appauth.MountRoutes(mux, handler, db)
+	wrapped := logging.NewMiddleware(logger)(mux)
+	srv := httptest.NewServer(wrapped)
+	defer srv.Close()
+
+	// No Authorization header → must get 401 / 40101.
+	req, _ := http.NewRequest("GET", srv.URL+"/users", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET /users: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for unauthenticated GET /users, got %d", resp.StatusCode)
+	}
+	data, _ := io.ReadAll(resp.Body)
+	var body map[string]any
+	_ = json.Unmarshal(data, &body)
+	if body["code"] != float64(40101) {
+		t.Fatalf("expected code 40101, got %v", body["code"])
+	}
+}
+
+// TestAuthBypassRemovedFailingDBAuthenticatedMESucceeds verifies that when
+// the Handler uses a failingUpdateDB wrapper for business SQL, the AuthMiddleware
+// still uses the real *sql.DB passed to MountRoutes and accepts a valid Bearer
+// token for GET /auth/me, returning 200. This proves the middleware is genuinely
+// checking the DB, not blindly rejecting all requests.
+func TestAuthBypassRemovedFailingDBAuthenticatedMESucceeds(t *testing.T) {
+	tmpDir := t.TempDir()
+	dsn := "file:" + filepath.Join(tmpDir, "test.db")
+
+	db, err := database.Open(dsn)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	migrationsDir := filepath.Join("..", "..", "..", "migrations")
+	if err := database.MigrateUp(db, migrationsDir); err != nil {
+		t.Fatalf("migrate up: %v", err)
+	}
+
+	createTestUser(t, db, "owner1", "Pass1234", "OWNER", "ACTIVE")
+
+	closedDB, _ := sql.Open("sqlite", "file:"+filepath.Join(tmpDir, "closed.db"))
+	closedDB.Close()
+	failingDB := &failingUpdateDB{db: db, closedDB: closedDB}
+
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	handler := appauth.NewHandler(failingDB, "test-jwt-secret-for-r4", logger)
+	mux := httpserver.New()
+	mux = appauth.MountRoutes(mux, handler, db)
+	wrapped := logging.NewMiddleware(logger)(mux)
+	srv := httptest.NewServer(wrapped)
+	defer srv.Close()
+
+	// Login to get a real access token (Login uses failingDB for business SQL,
+	// but the SELECT and password verify don't hit UPDATE, so login succeeds).
+	token := loginAndGetTokenWith(t, srv, "owner1", "Pass1234")
+	if token == "" {
+		t.Fatalf("login failed: no token returned")
+	}
+
+	// GET /auth/me with valid Bearer token → must get 200.
+	code, body, _ := doRequestWithToken(t, "GET", srv.URL+"/auth/me", token, nil)
+	if code != http.StatusOK {
+		t.Fatalf("expected 200 for authenticated GET /auth/me, got %d body=%v", code, body)
+	}
+	if body == nil || body["code"] != float64(0) {
+		t.Fatalf("expected code 0, got body=%v", body)
+	}
+}
+
+// loginAndGetTokenWith logs in against the given server and returns the access token.
+func loginAndGetTokenWith(t *testing.T, srv *httptest.Server, username, password string) string {
+	t.Helper()
+	req, _ := http.NewRequest("POST", srv.URL+"/auth/login",
+		bytes.NewReader([]byte(`{"username":"`+username+`","password":"`+password+`"}`)))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(resp.Body)
+	var body map[string]any
+	_ = json.Unmarshal(data, &body)
+	if d, ok := body["data"].(map[string]any); ok {
+		if token, ok := d["accessToken"].(string); ok {
+			return token
+		}
+	}
+	return ""
 }
