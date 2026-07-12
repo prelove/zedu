@@ -1,6 +1,6 @@
 # M2 共享契约与依赖冻结记录
 
-- 日期：2026-07-12
+- 日期：2026-07-12（r1）
 - 依据：PRD v3.1-r1、ADR-007、OpenSpec change `add-m2-core-management`
 - 状态：ACCEPTED（规划门禁）
 - 批准人：Product Owner
@@ -10,10 +10,10 @@
 | 依赖 | 版本 | 用途 | Owner |
 |---|---:|---|---|
 | `github.com/golang-jwt/jwt/v5` | `v5.3.1` | access token 签发与验证 | GLM / M2-GLM-01 |
-| `golang.org/x/crypto` | `v0.54.0` | bcrypt 密码哈希 | GLM / M2-GLM-01 |
+| `golang.org/x/crypto` | `v0.41.0` | bcrypt 密码哈希；保持 Go 1.23.3 兼容 | GLM / M2-GLM-01 |
 | `vue-router` | `v5.1.0` | 前端受保护路由 | Kimi / M2-KIMI-01 |
 
-不得新增 Pinia；M2 使用 Vue 内置响应式状态。不得使用 `latest`、`*` 或自行实现 JWT/bcrypt。
+不得新增 Pinia；M2 使用 Vue 内置响应式状态。不得使用 `latest`、`*` 或自行实现 JWT/bcrypt。Go module `go` directive 和 CI Go 版本固定为 `1.23.3`；不得以自动下载更高 toolchain 作为兼容性证据。
 
 ## HTTP 外层与错误码
 

@@ -15,7 +15,7 @@
 
 允许修改或新增：
 
-- `backend/go.mod`、`backend/go.sum`：只能新增 `github.com/golang-jwt/jwt/v5 v5.3.1` 与 `golang.org/x/crypto v0.54.0`，不得升级或替换其他依赖。
+- `backend/go.mod`、`backend/go.sum`：只能新增 `github.com/golang-jwt/jwt/v5 v5.3.1` 与 `golang.org/x/crypto v0.41.0`，`go` directive 必须保持 `1.23.3`；不得升级或替换其他依赖。
 - `backend/migrations/003_m2_auth_and_core.up.sql`、`backend/migrations/003_m2_auth_and_core.down.sql`。
 - `backend/internal/platform/auth/**`、`backend/internal/app/auth/**`。
 - `backend/internal/platform/httpserver/**`、必要的 `backend/cmd/zedu-server/main.go` 路由装配。

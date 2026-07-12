@@ -5,7 +5,7 @@
 | 工单 | Owner | 范围 | 状态 | 依赖 | 允许写入 | 验收人 |
 |---|---|---|---|---|---|---|
 | M2-CODEX-01 | Codex | 契约、依赖与负面范围冻结 | ACCEPTED | M1 ACCEPTED | docs/tasks/M2、docs/acceptance/evidence/M2、OpenSpec task状态 | Codex/PM |
-| M2-GLM-01 | GLM | 安全基础、统一契约、M2 迁移、认证/RBAC | READY | M2-CODEX-01 | `backend/go.mod`、`backend/go.sum`、`backend/migrations/003_*`、`backend/internal/platform/auth/**`、`backend/internal/app/auth/**`、`backend/internal/platform/httpserver/**`及测试 | Codex + 独立 Reviewer |
+| M2-GLM-01 | GLM | 安全基础、统一契约、M2 迁移、认证/RBAC | CHANGES_REQUESTED | M2-CODEX-01 | `backend/go.mod`、`backend/go.sum`、`backend/migrations/003_*`、`backend/internal/platform/auth/**`、`backend/internal/app/auth/**`、`backend/internal/platform/httpserver/**`及测试 | Codex + 独立 Reviewer |
 | M2-GLM-02 | GLM | 初始化、人员资料、课程/报名/安排 API | BLOCKED | M2-GLM-01 ACCEPTED | `backend/migrations/004_*`起、`backend/internal/app/onboarding/**`、`directory/**`、`course/**`、HTTP handlers及测试 | Codex + 独立 Reviewer |
 | M2-KIMI-01 | Kimi | 前端路由、认证、登录与初始化界面 | BLOCKED | M2-GLM-01 的认证契约 ACCEPTED | `frontend/package*.json`、`frontend/src/router/**`、`api/**`、`stores/**`、`features/auth/**`、`features/onboarding/**`、i18n与测试 | Codex + 独立 Reviewer |
 | M2-KIMI-02 | Kimi | 人员、课程、报名、安排页面 | BLOCKED | M2-GLM-02 API ACCEPTED、M2-KIMI-01 ACCEPTED | `frontend/src/features/directory/**`、`course/**`、i18n与测试 | Codex + 独立 Reviewer |
