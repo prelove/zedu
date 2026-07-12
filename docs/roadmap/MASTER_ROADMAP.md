@@ -1,12 +1,12 @@
 # Zedu 总路线图
 
-> 当前焦点：M2 规格冻结与执行准备。更新日期：2026-07-11。进度以验收门禁而非主观百分比计算。
+> 当前焦点：M2 核心资料与认证。更新日期：2026-07-12。进度以验收门禁而非主观百分比计算。
 
 | 里程碑 | 能力 | 状态 | 退出条件 |
 |---|---|---|---|
 | M0 | 治理、PRD修订、OpenSpec 1.6迁移、规范、仓库基线 | ACCEPTED | strict通过、旧需求零孤儿、文档/证据齐全 |
 | M1 | 工程骨架、迁移、CI、i18n与质量门禁 | ACCEPTED | Windows/Ubuntu CI全绿，Linux race、up/down/up及Win JP通过 |
-| M2 | 认证初始化、人员课程、报名安排 | PLANNING | 先冻结业务语义与API契约，再验证RBAC与核心资料E2E |
+| M2 | 认证初始化、人员课程、报名安排 | IN_PROGRESS | 已冻结契约；RBAC与核心资料E2E通过后验收 |
 | M3 | 充值、流水、付款凭证 | BACKLOG | 事务/IDOR/恶意文件/补偿/恢复通过 |
 | M4a | 排课 | BACKLOG | 排课与通知副作用解耦 |
 | M4b | Resend通知outbox-lite | BACKLOG | 幂等/lease/失败/重放/三语通过 |

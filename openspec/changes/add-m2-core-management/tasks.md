@@ -1,7 +1,7 @@
 ## 0. 执行规则与冻结点
 
-- [ ] 0.1 [Codex/PM，依赖：M1 ACCEPTED；输出：`docs/tasks/M2/M2_EXECUTION_BOARD.md`；测试：OpenSpec strict；证据：`docs/acceptance/evidence/M2/contract-freeze.md`；门禁：READY] 冻结本 change 的路由、JSON 外层、错误码、角色矩阵、分页字段和精确依赖版本；确认 `student.email` 非空全局唯一（含软删除）、重复为`40901`，以及`teacher_capability(teacher_id,track_id,level_id)`唯一。未经该冻结，GLM/Kimi不得编码或新增依赖。
-- [ ] 0.2 [Codex/PM，依赖：0.1；输出：范围负面清单；测试：路由/迁移/前端导航审查；证据：M2 contract-freeze；门禁：READY] 明确 M2 禁止 lesson、attendance、payment、payment evidence、notification、backup、report、payout、学生/老师/家长登录及其 API、路由、菜单；将禁止项加入后续验收清单。
+- [x] 0.1 [Codex/PM，依赖：M1 ACCEPTED；输出：`docs/tasks/M2/M2_EXECUTION_BOARD.md`；测试：OpenSpec strict；证据：`docs/acceptance/evidence/M2/contract-freeze.md`；门禁：READY] 冻结本 change 的路由、JSON 外层、错误码、角色矩阵、分页字段和精确依赖版本；确认 `student.email` 非空全局唯一（含软删除）、重复为`40901`，以及`teacher_capability(teacher_id,track_id,level_id)`唯一。未经该冻结，GLM/Kimi不得编码或新增依赖。
+- [x] 0.2 [Codex/PM，依赖：0.1；输出：范围负面清单；测试：路由/迁移/前端导航审查；证据：M2 contract-freeze；门禁：READY] 明确 M2 禁止 lesson、attendance、payment、payment evidence、notification、backup、report、payout、学生/老师/家长登录及其 API、路由、菜单；将禁止项加入后续验收清单。
 
 ## 1. 后端通用契约与安全基础（GLM）
 
