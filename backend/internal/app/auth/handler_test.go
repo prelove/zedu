@@ -518,3 +518,211 @@ var (
 	_ time.Duration
 	_ = fmt.Sprintf
 )
+
+// ==================== P1.2: Disabled account access token immediately rejected ====================
+
+func TestDisabledAccountAccessTokenImmediatelyRejected(t *testing.T) {
+	ts := newTestServer(t)
+	createTestUser(t, ts.db, "owner1", "Pass1234", "OWNER", "ACTIVE")
+	createTestUser(t, ts.db, "op1", "Pass1234", "OPERATOR", "ACTIVE")
+
+	// Operator logs in and gets access token.
+	opToken := loginAndGetToken(t, ts, "op1", "Pass1234")
+
+	// Verify token works before disable.
+	code, _, _ := doRequestWithToken(t, "GET", ts.srv.URL+"/auth/me", opToken, nil)
+	if code != http.StatusOK {
+		t.Fatalf("expected 200 before disable, got %d", code)
+	}
+
+	// Owner disables operator.
+	ownerToken := loginAndGetToken(t, ts, "owner1", "Pass1234")
+	code, _, _ = doRequestWithToken(t, "POST", ts.srv.URL+"/users/2/disable", ownerToken, nil)
+	if code != http.StatusOK {
+		t.Fatalf("expected 200 for disable, got %d", code)
+	}
+
+	// Operator's existing access token must now return 40101 immediately.
+	code, body, _ := doRequestWithToken(t, "GET", ts.srv.URL+"/auth/me", opToken, nil)
+	if code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 after disable, got %d", code)
+	}
+	if body["code"] != float64(40101) {
+		t.Fatalf("expected code 40101 after disable, got %v", body["code"])
+	}
+}
+
+// ==================== P1.3: Concurrent refresh only one succeeds ====================
+
+func TestConcurrentRefreshOnlyOneSucceeds(t *testing.T) {
+	ts := newTestServer(t)
+	createTestUser(t, ts.db, "owner1", "Pass1234", "OWNER", "ACTIVE")
+
+	// Login to get refresh cookie.
+	_, _, resp := doRequest(t, "POST", ts.srv.URL+"/auth/login",
+		map[string]string{"username": "owner1", "password": "Pass1234"}, nil)
+	cookie := extractRefreshCookie(resp)
+	if cookie == nil {
+		t.Fatalf("no refresh cookie after login")
+	}
+
+	// Fire multiple concurrent refresh requests with the same cookie.
+	const goroutines = 5
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	successes := 0
+	failures := 0
+
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			req, _ := http.NewRequest("POST", ts.srv.URL+"/auth/refresh", nil)
+			req.AddCookie(cookie)
+			r, err := http.DefaultClient.Do(req)
+			if err != nil {
+				mu.Lock()
+				failures++
+				mu.Unlock()
+				return
+			}
+			r.Body.Close()
+			mu.Lock()
+			if r.StatusCode == http.StatusOK {
+				successes++
+			} else {
+				failures++
+			}
+			mu.Unlock()
+		}()
+	}
+	wg.Wait()
+
+	if successes != 1 {
+		t.Fatalf("expected exactly 1 concurrent refresh success, got %d (failures=%d)", successes, failures)
+	}
+	if failures != goroutines-1 {
+		t.Fatalf("expected %d concurrent refresh failures, got %d", goroutines-1, failures)
+	}
+}
+
+// ==================== P1.4: Password rules + Operator-only creation ====================
+
+func TestCreateUserRejectsWeakPassword(t *testing.T) {
+	ts := newTestServer(t)
+	createTestUser(t, ts.db, "owner1", "Pass1234", "OWNER", "ACTIVE")
+	ownerToken := loginAndGetToken(t, ts, "owner1", "Pass1234")
+
+	// Too short.
+	code, body, _ := doRequestWithToken(t, "POST", ts.srv.URL+"/users", ownerToken,
+		map[string]string{"username": "op2", "password": "Ab1", "role": "OPERATOR"})
+	if code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422 for short password, got %d", code)
+	}
+	if body["code"] != float64(42201) {
+		t.Fatalf("expected code 42201, got %v", body["code"])
+	}
+
+	// No digit.
+	code, body, _ = doRequestWithToken(t, "POST", ts.srv.URL+"/users", ownerToken,
+		map[string]string{"username": "op2", "password": "abcdefgh", "role": "OPERATOR"})
+	if code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422 for password with no digit, got %d", code)
+	}
+
+	// No letter.
+	code, body, _ = doRequestWithToken(t, "POST", ts.srv.URL+"/users", ownerToken,
+		map[string]string{"username": "op2", "password": "12345678", "role": "OPERATOR"})
+	if code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422 for password with no letter, got %d", code)
+	}
+}
+
+func TestCreateUserRejectsOwnerRole(t *testing.T) {
+	ts := newTestServer(t)
+	createTestUser(t, ts.db, "owner1", "Pass1234", "OWNER", "ACTIVE")
+	ownerToken := loginAndGetToken(t, ts, "owner1", "Pass1234")
+
+	code, body, _ := doRequestWithToken(t, "POST", ts.srv.URL+"/users", ownerToken,
+		map[string]string{"username": "owner2", "password": "Pass1234", "role": "OWNER"})
+	if code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422 for creating OWNER via API, got %d", code)
+	}
+	if body["code"] != float64(42201) {
+		t.Fatalf("expected code 42201, got %v", body["code"])
+	}
+}
+
+func TestCreateUserOperatorSuccess(t *testing.T) {
+	ts := newTestServer(t)
+	createTestUser(t, ts.db, "owner1", "Pass1234", "OWNER", "ACTIVE")
+	ownerToken := loginAndGetToken(t, ts, "owner1", "Pass1234")
+
+	code, body, _ := doRequestWithToken(t, "POST", ts.srv.URL+"/users", ownerToken,
+		map[string]string{"username": "op2", "password": "Pass1234", "role": "OPERATOR"})
+	if code != http.StatusCreated {
+		t.Fatalf("expected 201 for valid operator creation, got %d body=%v", code, body)
+	}
+	if body["code"] != float64(0) {
+		t.Fatalf("expected code 0, got %v", body["code"])
+	}
+	data := body["data"].(map[string]any)
+	if data["role"] != "OPERATOR" {
+		t.Fatalf("expected role OPERATOR, got %v", data["role"])
+	}
+}
+
+// ==================== P2.2: Log includes request ID, unknown user no username ====================
+
+func TestLoginLogIncludesRequestIDAndNoUsernameForUnknownUser(t *testing.T) {
+	tmpDir := t.TempDir()
+	dsn := "file:" + filepath.Join(tmpDir, "test.db")
+
+	db, err := database.Open(dsn)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	migrationsDir := filepath.Join("..", "..", "..", "migrations")
+	if err := database.MigrateUp(db, migrationsDir); err != nil {
+		t.Fatalf("migrate up: %v", err)
+	}
+
+	var logBuf bytes.Buffer
+	logger := slog.New(logging.NewRedactingHandler(slog.NewJSONHandler(&logBuf, nil)))
+
+	handler := appauth.NewHandler(db, "test-secret-at-least-32-chars", logger)
+	mux := httpserver.New()
+	mux = appauth.MountRoutes(mux, handler)
+	wrapped := logging.NewMiddleware(logger)(mux)
+	srv := httptest.NewServer(wrapped)
+	defer srv.Close()
+
+	// Login with unknown username.
+	_, _, _ = doRequest(t, "POST", srv.URL+"/auth/login",
+		map[string]string{"username": "nonexistentuser123", "password": "Pass1234"}, nil)
+
+	logOutput := logBuf.String()
+
+	// Log must not contain the username (sensitive identifier for unknown user).
+	if strings.Contains(logOutput, "nonexistentuser123") {
+		t.Fatalf("log leaked unknown username: %s", logOutput)
+	}
+
+	// Log must contain request_id.
+	if !strings.Contains(logOutput, "request_id") {
+		t.Fatalf("log must include request_id: %s", logOutput)
+	}
+}
+
+// ==================== P0.1: No default JWT secret in production ====================
+
+func TestValidateSecretFailsOnEmpty(t *testing.T) {
+	if err := auth.ValidateSecret(""); err == nil {
+		t.Fatalf("ValidateSecret must fail on empty secret")
+	}
+	if err := auth.ValidateSecret("short"); err == nil {
+		t.Fatalf("ValidateSecret must fail on short secret")
+	}
+}

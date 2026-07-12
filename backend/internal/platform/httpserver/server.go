@@ -2,6 +2,7 @@ package httpserver
 
 import (
 	"context"
+	"database/sql"
 	"net/http"
 	"strings"
 
@@ -15,7 +16,8 @@ const (
 	ctxKeyUser ctxKey = iota
 )
 
-// AuthUser holds the authenticated user's identity extracted from the JWT.
+// AuthUser holds the authenticated user's identity extracted from the JWT
+// and confirmed against the database on every request.
 type AuthUser struct {
 	UserID int64
 	Role   string
@@ -39,10 +41,11 @@ func New() *http.ServeMux {
 	return mux
 }
 
-// AuthMiddleware returns a middleware that validates the Bearer access token
-// and injects the AuthUser into the request context. If the token is missing
-// or invalid, it returns 401 with code 40101.
-func AuthMiddleware(jwtSecret string) func(http.Handler) http.Handler {
+// AuthMiddleware returns a middleware that validates the Bearer access token,
+// then confirms the user is still ACTIVE in the database and loads the
+// authoritative role from DB (not from the JWT). If the token is missing,
+// invalid, or the account is no longer ACTIVE, it returns 401 with code 40101.
+func AuthMiddleware(jwtSecret string, db *sql.DB) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			header := r.Header.Get("Authorization")
@@ -58,7 +61,19 @@ func AuthMiddleware(jwtSecret string) func(http.Handler) http.Handler {
 				return
 			}
 
-			user := AuthUser{UserID: claims.UserID, Role: claims.Role}
+			// Confirm the account is still ACTIVE and load the authoritative role.
+			var role string
+			err = db.QueryRowContext(r.Context(),
+				`SELECT role FROM user_account WHERE id = ? AND status = 'ACTIVE' AND deleted_at IS NULL`,
+				claims.UserID,
+			).Scan(&role)
+			if err != nil {
+				// sql.ErrNoRows or any DB error → treat as unauthenticated.
+				WriteErrorFromContext(w, r, http.StatusUnauthorized, CodeUnauth, "AUTH_REQUIRED")
+				return
+			}
+
+			user := AuthUser{UserID: claims.UserID, Role: role}
 			ctx := context.WithValue(r.Context(), ctxKeyUser, user)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})

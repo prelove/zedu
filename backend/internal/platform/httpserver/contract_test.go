@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/prelove/zedu/backend/internal/platform/database"
 	"github.com/prelove/zedu/backend/internal/platform/httpserver"
 )
 
@@ -101,9 +103,23 @@ func TestErrorCodesMapping(t *testing.T) {
 }
 
 func TestUnauthenticatedRequestReturns40101(t *testing.T) {
+	// Open a temp DB and migrate so the middleware can query user_account.
+	tmpDir := t.TempDir()
+	dsn := "file:" + filepath.Join(tmpDir, "test.db")
+	db, err := database.Open(dsn)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	migrationsDir := filepath.Join("..", "..", "..", "migrations")
+	if err := database.MigrateUp(db, migrationsDir); err != nil {
+		t.Fatalf("migrate up: %v", err)
+	}
+
 	// Create a mux with an auth-protected route to test the middleware.
 	mux := http.NewServeMux()
-	authMW := httpserver.AuthMiddleware("test-secret")
+	authMW := httpserver.AuthMiddleware("test-secret-at-least-32-chars-long", db)
 	mux.Handle("GET /auth/me", authMW(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		httpserver.WriteSuccess(w, http.StatusOK, map[string]any{"ok": true})
 	})))

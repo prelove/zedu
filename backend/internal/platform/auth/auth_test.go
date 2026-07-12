@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/prelove/zedu/backend/internal/platform/auth"
 )
 
@@ -132,4 +133,100 @@ func TestHashRefreshToken(t *testing.T) {
 	if hash == hash3 {
 		t.Fatalf("different tokens must produce different hashes")
 	}
+}
+
+// ==================== P0.1: ValidateSecret ====================
+
+func TestValidateSecretRejectsEmpty(t *testing.T) {
+	if err := auth.ValidateSecret(""); err == nil {
+		t.Fatalf("expected error for empty secret")
+	}
+}
+
+func TestValidateSecretRejectsShort(t *testing.T) {
+	if err := auth.ValidateSecret("short"); err == nil {
+		t.Fatalf("expected error for short secret")
+	}
+}
+
+func TestValidateSecretAcceptsLongEnough(t *testing.T) {
+	if err := auth.ValidateSecret("this-is-a-secure-secret-at-least-32-chars"); err != nil {
+		t.Fatalf("expected no error for valid secret, got %v", err)
+	}
+}
+
+// ==================== P1.4: ValidatePassword ====================
+
+func TestValidatePasswordRejectsShort(t *testing.T) {
+	if err := auth.ValidatePassword("Ab1"); err == nil {
+		t.Fatalf("expected error for short password")
+	}
+}
+
+func TestValidatePasswordRejectsNoLetter(t *testing.T) {
+	if err := auth.ValidatePassword("12345678"); err == nil {
+		t.Fatalf("expected error for password with no letter")
+	}
+}
+
+func TestValidatePasswordRejectsNoDigit(t *testing.T) {
+	if err := auth.ValidatePassword("abcdefgh"); err == nil {
+		t.Fatalf("expected error for password with no digit")
+	}
+}
+
+func TestValidatePasswordAcceptsValid(t *testing.T) {
+	if err := auth.ValidatePassword("Pass1234"); err != nil {
+		t.Fatalf("expected no error for valid password, got %v", err)
+	}
+}
+
+// ==================== P2.3: Strict HS256 ====================
+
+func TestJWTRejectsHS384(t *testing.T) {
+	secret := "test-secret-key-at-least-32-chars"
+	// Sign with HS384.
+	token := jwt.NewWithClaims(jwt.SigningMethodHS384, auth.Claims{
+		UserID: 1,
+		Role:   "OWNER",
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(60 * time.Minute)),
+		},
+	})
+	tokenStr, err := token.SignedString([]byte(secret))
+	if err != nil {
+		t.Fatalf("sign HS384: %v", err)
+	}
+
+	_, err = auth.VerifyAccessToken(secret, tokenStr)
+	if err == nil {
+		t.Fatalf("expected error for HS384 token, got nil")
+	}
+}
+
+func TestJWTRejectsHS512(t *testing.T) {
+	secret := "test-secret-key-at-least-32-chars"
+	token := jwt.NewWithClaims(jwt.SigningMethodHS512, auth.Claims{
+		UserID: 1,
+		Role:   "OWNER",
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(60 * time.Minute)),
+		},
+	})
+	tokenStr, err := token.SignedString([]byte(secret))
+	if err != nil {
+		t.Fatalf("sign HS512: %v", err)
+	}
+
+	_, err = auth.VerifyAccessToken(secret, tokenStr)
+	if err == nil {
+		t.Fatalf("expected error for HS512 token, got nil")
+	}
+}
+
+// ==================== P2.3: VerifyPasswordDummy ====================
+
+func TestVerifyPasswordDummyDoesNotPanic(t *testing.T) {
+	// Just ensure it runs without panic.
+	auth.VerifyPasswordDummy("somepassword")
 }

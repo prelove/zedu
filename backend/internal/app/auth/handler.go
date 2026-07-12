@@ -48,7 +48,7 @@ func MountRoutes(mux *http.ServeMux, h *Handler) *http.ServeMux {
 	mux.HandleFunc("POST /auth/refresh", h.Refresh)
 
 	// Authenticated routes — each wrapped with AuthMiddleware.
-	authMW := httpserver.AuthMiddleware(h.jwtSecret)
+	authMW := httpserver.AuthMiddleware(h.jwtSecret, h.db)
 
 	mux.Handle("POST /auth/logout", authMW(http.HandlerFunc(h.Logout)))
 	mux.Handle("GET /auth/me", authMW(http.HandlerFunc(h.Me)))
@@ -73,9 +73,11 @@ type LoginResponse struct {
 
 // Login handles POST /auth/login.
 func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
+	rid := httpserver.RequestIDFromContext(r.Context())
+
 	var req LoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httpserver.WriteErrorFromContext(w, r, http.StatusBadRequest, httpserver.CodeLoginFailed, "INVALID_REQUEST")
+		httpserver.WriteErrorFromContext(w, r, http.StatusUnauthorized, httpserver.CodeLoginFailed, "LOGIN_FAILED")
 		return
 	}
 
@@ -98,21 +100,28 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	authFailedMsg := "LOGIN_FAILED"
 
 	if err == sql.ErrNoRows {
+		// Dummy bcrypt compare to reduce timing-based user enumeration (P2.3).
+		auth.VerifyPasswordDummy(req.Password)
+		// Do not log the username — it is a user-supplied sensitive identifier.
 		h.logger.Info("login failed: unknown user",
-			slog.String("username", req.Username),
+			slog.String("request_id", rid),
 		)
 		httpserver.WriteErrorFromContext(w, r, http.StatusUnauthorized, authFailedCode, authFailedMsg)
 		return
 	}
 	if err != nil {
-		h.logger.Error("login query error", slog.Any("error", err))
-		httpserver.WriteErrorFromContext(w, r, http.StatusInternalServerError, httpserver.CodeLoginFailed, authFailedMsg)
+		h.logger.Error("login query error",
+			slog.String("request_id", rid),
+			slog.Any("error", err),
+		)
+		httpserver.WriteErrorFromContext(w, r, http.StatusUnauthorized, authFailedCode, authFailedMsg)
 		return
 	}
 
 	// Check lockout.
 	if lockedUntil != nil && time.Now().UTC().Before(*lockedUntil) {
 		h.logger.Info("login rejected: account locked",
+			slog.String("request_id", rid),
 			slog.Int64("user_id", id),
 		)
 		httpserver.WriteErrorFromContext(w, r, http.StatusUnauthorized, httpserver.CodeLocked, "ACCOUNT_LOCKED")
@@ -122,6 +131,10 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	// Check if account is active.
 	if status != "ACTIVE" {
 		// Same error as wrong password — don't disclose that account is disabled.
+		h.logger.Info("login failed: account not active",
+			slog.String("request_id", rid),
+			slog.Int64("user_id", id),
+		)
 		httpserver.WriteErrorFromContext(w, r, http.StatusUnauthorized, authFailedCode, authFailedMsg)
 		return
 	}
@@ -142,6 +155,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 			)
 		}
 		h.logger.Info("login failed: wrong password",
+			slog.String("request_id", rid),
 			slog.Int64("user_id", id),
 			slog.Int("fail_count", newFailCount),
 		)
@@ -158,16 +172,22 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	// Issue access token.
 	accessToken, err := auth.SignAccessToken(h.jwtSecret, id, role, accessTokenDuration)
 	if err != nil {
-		h.logger.Error("sign access token", slog.Any("error", err))
-		httpserver.WriteErrorFromContext(w, r, http.StatusInternalServerError, httpserver.CodeLoginFailed, authFailedMsg)
+		h.logger.Error("sign access token",
+			slog.String("request_id", rid),
+			slog.Any("error", err),
+		)
+		httpserver.WriteErrorFromContext(w, r, http.StatusUnauthorized, authFailedCode, authFailedMsg)
 		return
 	}
 
 	// Issue refresh token.
 	refreshToken, err := auth.GenerateRefreshToken()
 	if err != nil {
-		h.logger.Error("generate refresh token", slog.Any("error", err))
-		httpserver.WriteErrorFromContext(w, r, http.StatusInternalServerError, httpserver.CodeLoginFailed, authFailedMsg)
+		h.logger.Error("generate refresh token",
+			slog.String("request_id", rid),
+			slog.Any("error", err),
+		)
+		httpserver.WriteErrorFromContext(w, r, http.StatusUnauthorized, authFailedCode, authFailedMsg)
 		return
 	}
 
@@ -178,8 +198,11 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		id, refreshHash, expiresAt,
 	)
 	if err != nil {
-		h.logger.Error("insert refresh session", slog.Any("error", err))
-		httpserver.WriteErrorFromContext(w, r, http.StatusInternalServerError, httpserver.CodeLoginFailed, authFailedMsg)
+		h.logger.Error("insert refresh session",
+			slog.String("request_id", rid),
+			slog.Any("error", err),
+		)
+		httpserver.WriteErrorFromContext(w, r, http.StatusUnauthorized, authFailedCode, authFailedMsg)
 		return
 	}
 
@@ -195,6 +218,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	})
 
 	h.logger.Info("login success",
+		slog.String("request_id", rid),
 		slog.Int64("user_id", id),
 		slog.String("role", role),
 	)
@@ -206,7 +230,10 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 }
 
 // Refresh handles POST /auth/refresh. Reads refresh token from cookie,
-// rotates it, and returns a new access token.
+// rotates it in a single transaction, and returns a new access token.
+// The rotation is atomic: revoke old session (conditional on revoked_at IS NULL)
+// and insert new session in one BeginTx. Concurrent requests with the same
+// token will see rows-affected=0 on the conditional UPDATE and be rejected.
 func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 	cookie, err := r.Cookie(RefreshCookieName)
 	if err != nil {
@@ -217,7 +244,7 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 	refreshToken := cookie.Value
 	refreshHash := auth.HashRefreshToken(refreshToken)
 
-	// Look up the session.
+	// Look up the session (read-only, outside the rotation tx).
 	var (
 		sessionID int64
 		userID    int64
@@ -258,44 +285,71 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 
 	// Check if account is still active.
 	if status != "ACTIVE" {
-		// Revoke the session.
+		// Revoke the session (best-effort, no tx needed for read-only reject).
 		_, _ = h.db.ExecContext(r.Context(),
-			`UPDATE refresh_session SET revoked_at = ? WHERE id = ?`,
+			`UPDATE refresh_session SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL`,
 			time.Now().UTC(), sessionID,
 		)
 		httpserver.WriteErrorFromContext(w, r, http.StatusUnauthorized, httpserver.CodeUnauth, "AUTH_REQUIRED")
 		return
 	}
 
-	// Rotate: revoke old session, create new one.
-	_, err = h.db.ExecContext(r.Context(),
-		`UPDATE refresh_session SET revoked_at = ? WHERE id = ?`,
-		time.Now().UTC(), sessionID,
-	)
-	if err != nil {
-		h.logger.Error("revoke old session", slog.Any("error", err))
-		httpserver.WriteErrorFromContext(w, r, http.StatusInternalServerError, httpserver.CodeUnauth, "AUTH_REQUIRED")
-		return
-	}
-
+	// Generate new refresh token (crypto rand, safe outside tx).
 	newRefreshToken, err := auth.GenerateRefreshToken()
 	if err != nil {
 		httpserver.WriteErrorFromContext(w, r, http.StatusInternalServerError, httpserver.CodeUnauth, "AUTH_REQUIRED")
 		return
 	}
-
 	newRefreshHash := auth.HashRefreshToken(newRefreshToken)
 	newExpiresAt := time.Now().UTC().Add(refreshTokenDuration)
-	_, err = h.db.ExecContext(r.Context(),
-		`INSERT INTO refresh_session (user_id, token_hash, expires_at) VALUES (?, ?, ?)`,
-		userID, newRefreshHash, newExpiresAt,
-	)
+
+	// Atomic rotation: single transaction.
+	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
+		h.logger.Error("begin tx for refresh rotation", slog.Any("error", err))
 		httpserver.WriteErrorFromContext(w, r, http.StatusInternalServerError, httpserver.CodeUnauth, "AUTH_REQUIRED")
 		return
 	}
 
-	// Issue new access token.
+	// Conditionally revoke the old session. If another concurrent request
+	// already revoked it, rows-affected will be 0 and we roll back.
+	res, err := tx.ExecContext(r.Context(),
+		`UPDATE refresh_session SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL`,
+		time.Now().UTC(), sessionID,
+	)
+	if err != nil {
+		_ = tx.Rollback()
+		h.logger.Error("revoke old session in tx", slog.Any("error", err))
+		httpserver.WriteErrorFromContext(w, r, http.StatusInternalServerError, httpserver.CodeUnauth, "AUTH_REQUIRED")
+		return
+	}
+	rowsAffected, _ := res.RowsAffected()
+	if rowsAffected != 1 {
+		// Another request already rotated this token.
+		_ = tx.Rollback()
+		httpserver.WriteErrorFromContext(w, r, http.StatusUnauthorized, httpserver.CodeUnauth, "AUTH_REQUIRED")
+		return
+	}
+
+	// Insert the new session in the same transaction.
+	_, err = tx.ExecContext(r.Context(),
+		`INSERT INTO refresh_session (user_id, token_hash, expires_at) VALUES (?, ?, ?)`,
+		userID, newRefreshHash, newExpiresAt,
+	)
+	if err != nil {
+		_ = tx.Rollback()
+		h.logger.Error("insert new session in tx", slog.Any("error", err))
+		httpserver.WriteErrorFromContext(w, r, http.StatusInternalServerError, httpserver.CodeUnauth, "AUTH_REQUIRED")
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		h.logger.Error("commit refresh rotation", slog.Any("error", err))
+		httpserver.WriteErrorFromContext(w, r, http.StatusInternalServerError, httpserver.CodeUnauth, "AUTH_REQUIRED")
+		return
+	}
+
+	// Issue new access token (after tx committed; JWT is stateless).
 	accessToken, err := auth.SignAccessToken(h.jwtSecret, userID, role, accessTokenDuration)
 	if err != nil {
 		httpserver.WriteErrorFromContext(w, r, http.StatusInternalServerError, httpserver.CodeUnauth, "AUTH_REQUIRED")
@@ -389,7 +443,7 @@ func (h *Handler) handleUsers(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		h.CreateUser(w, r)
 	default:
-		httpserver.WriteErrorFromContext(w, r, http.StatusMethodNotAllowed, httpserver.CodeForbidden, "METHOD_NOT_ALLOWED")
+		httpserver.WriteErrorFromContext(w, r, http.StatusForbidden, httpserver.CodeForbidden, "METHOD_NOT_ALLOWED")
 	}
 }
 
@@ -399,7 +453,7 @@ func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
 		`SELECT id, username, role, display_name, status, created_at FROM user_account WHERE deleted_at IS NULL ORDER BY id`,
 	)
 	if err != nil {
-		httpserver.WriteErrorFromContext(w, r, http.StatusInternalServerError, httpserver.CodeForbidden, "INTERNAL_ERROR")
+		httpserver.WriteErrorFromContext(w, r, http.StatusInternalServerError, httpserver.CodeInvalidState, "INTERNAL_ERROR")
 		return
 	}
 	defer rows.Close()
@@ -441,27 +495,35 @@ type CreateUserRequest struct {
 	DisplayName string `json:"displayName"`
 }
 
-// CreateUser handles POST /users (Owner-only).
+// CreateUser handles POST /users (Owner-only). Only OPERATOR accounts can be
+// created via this endpoint; OWNER accounts are created only via onboarding
+// or DB seeding. Password must meet PRD rules (>=8 chars, letter+digit).
 func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	var req CreateUserRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httpserver.WriteErrorFromContext(w, r, http.StatusBadRequest, httpserver.CodeForbidden, "INVALID_REQUEST")
+		httpserver.WriteErrorFromContext(w, r, http.StatusUnprocessableEntity, httpserver.CodeInvalidState, "INVALID_REQUEST")
 		return
 	}
 
-	if req.Username == "" || req.Password == "" || req.Role == "" {
-		httpserver.WriteErrorFromContext(w, r, http.StatusBadRequest, httpserver.CodeForbidden, "INVALID_REQUEST")
+	if req.Username == "" {
+		httpserver.WriteErrorFromContext(w, r, http.StatusUnprocessableEntity, httpserver.CodeInvalidState, "USERNAME_REQUIRED")
 		return
 	}
 
-	if req.Role != "OWNER" && req.Role != "OPERATOR" {
-		httpserver.WriteErrorFromContext(w, r, http.StatusBadRequest, httpserver.CodeForbidden, "INVALID_REQUEST")
+	if err := auth.ValidatePassword(req.Password); err != nil {
+		httpserver.WriteErrorFromContext(w, r, http.StatusUnprocessableEntity, httpserver.CodeInvalidState, "INVALID_PASSWORD")
+		return
+	}
+
+	// Only OPERATOR can be created via this endpoint.
+	if req.Role != "OPERATOR" {
+		httpserver.WriteErrorFromContext(w, r, http.StatusUnprocessableEntity, httpserver.CodeInvalidState, "ROLE_MUST_BE_OPERATOR")
 		return
 	}
 
 	hash, err := auth.HashPassword(req.Password)
 	if err != nil {
-		httpserver.WriteErrorFromContext(w, r, http.StatusInternalServerError, httpserver.CodeForbidden, "INTERNAL_ERROR")
+		httpserver.WriteErrorFromContext(w, r, http.StatusInternalServerError, httpserver.CodeInvalidState, "INTERNAL_ERROR")
 		return
 	}
 
@@ -493,7 +555,7 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) handleDisableUser(w http.ResponseWriter, r *http.Request) {
 	userID, ok := extractUserIDFromPath(r.URL.Path, "/users/")
 	if !ok {
-		httpserver.WriteErrorFromContext(w, r, http.StatusBadRequest, httpserver.CodeNotFound, "INVALID_USER_ID")
+		httpserver.WriteErrorFromContext(w, r, http.StatusNotFound, httpserver.CodeNotFound, "INVALID_USER_ID")
 		return
 	}
 	h.DisableUser(w, r, userID)
@@ -524,7 +586,7 @@ func (h *Handler) DisableUser(w http.ResponseWriter, r *http.Request, userID int
 		userID,
 	)
 	if err != nil {
-		httpserver.WriteErrorFromContext(w, r, http.StatusInternalServerError, httpserver.CodeForbidden, "INTERNAL_ERROR")
+		httpserver.WriteErrorFromContext(w, r, http.StatusInternalServerError, httpserver.CodeInvalidState, "INTERNAL_ERROR")
 		return
 	}
 	rows, _ := result.RowsAffected()

@@ -298,3 +298,154 @@ func TestM2UserAccountUsernameUnique(t *testing.T) {
 		t.Fatalf("expected unique violation on duplicate username, got nil")
 	}
 }
+
+// TestM2TeacherCapabilityTrackLevelNotNull verifies that track_id and level_id
+// are NOT NULL — SQLite UNIQUE does not conflict on NULLs, so NULLable columns
+// would break the triple-uniqueness guarantee.
+func TestM2TeacherCapabilityTrackLevelNotNull(t *testing.T) {
+	db := newMigratedDBForM2(t)
+
+	// Setup prerequisite data.
+	_, err := db.Exec(`INSERT INTO course_domain (name, code, type) VALUES ('Japanese', 'JP', 'LANGUAGE')`)
+	if err != nil {
+		t.Fatalf("insert domain: %v", err)
+	}
+	_, err = db.Exec(`INSERT INTO course_track (domain_id, name, code) VALUES (1, 'JLPT', 'JLPT')`)
+	if err != nil {
+		t.Fatalf("insert track: %v", err)
+	}
+	_, err = db.Exec(`INSERT INTO course_level (track_id, name, code) VALUES (1, 'N1', 'N1')`)
+	if err != nil {
+		t.Fatalf("insert level: %v", err)
+	}
+	_, err = db.Exec(`INSERT INTO teacher (name) VALUES ('Sensei')`)
+	if err != nil {
+		t.Fatalf("insert teacher: %v", err)
+	}
+
+	// Insert with NULL track_id must fail.
+	_, err = db.Exec(`INSERT INTO teacher_capability (teacher_id, domain_id, track_id, level_id) VALUES (1, 1, NULL, 1)`)
+	if err == nil {
+		t.Fatalf("expected NOT NULL violation on track_id, got nil")
+	}
+
+	// Insert with NULL level_id must fail.
+	_, err = db.Exec(`INSERT INTO teacher_capability (teacher_id, domain_id, track_id, level_id) VALUES (1, 1, 1, NULL)`)
+	if err == nil {
+		t.Fatalf("expected NOT NULL violation on level_id, got nil")
+	}
+}
+
+// TestM2AssignmentOnlyOneActivePerEnrollment verifies the partial unique index
+// that enforces at most one ACTIVE assignment per enrollment.
+func TestM2AssignmentOnlyOneActivePerEnrollment(t *testing.T) {
+	db := newMigratedDBForM2(t)
+
+	// Setup prerequisite data.
+	_, err := db.Exec(`INSERT INTO course_domain (name, code, type) VALUES ('JP', 'JP', 'LANGUAGE')`)
+	if err != nil {
+		t.Fatalf("insert domain: %v", err)
+	}
+	_, err = db.Exec(`INSERT INTO course_track (domain_id, name, code) VALUES (1, 'JLPT', 'JLPT')`)
+	if err != nil {
+		t.Fatalf("insert track: %v", err)
+	}
+	_, err = db.Exec(`INSERT INTO student (name) VALUES ('Student1')`)
+	if err != nil {
+		t.Fatalf("insert student: %v", err)
+	}
+	_, err = db.Exec(`INSERT INTO teacher (name) VALUES ('Teacher1')`)
+	if err != nil {
+		t.Fatalf("insert teacher: %v", err)
+	}
+	_, err = db.Exec(`INSERT INTO teacher (name) VALUES ('Teacher2')`)
+	if err != nil {
+		t.Fatalf("insert teacher2: %v", err)
+	}
+	_, err = db.Exec(`INSERT INTO student_course_enrollment (student_id, domain_id, track_id) VALUES (1, 1, 1)`)
+	if err != nil {
+		t.Fatalf("insert enrollment: %v", err)
+	}
+
+	// First ACTIVE assignment succeeds.
+	_, err = db.Exec(`INSERT INTO student_teacher_assignment (enrollment_id, student_id, teacher_id, start_date) VALUES (1, 1, 1, '2026-01-01')`)
+	if err != nil {
+		t.Fatalf("insert first ACTIVE assignment: %v", err)
+	}
+
+	// Second ACTIVE assignment for same enrollment must fail.
+	_, err = db.Exec(`INSERT INTO student_teacher_assignment (enrollment_id, student_id, teacher_id, start_date) VALUES (1, 1, 2, '2026-01-01')`)
+	if err == nil {
+		t.Fatalf("expected unique violation on second ACTIVE assignment for same enrollment, got nil")
+	}
+
+	// PAUSED assignment for same enrollment succeeds (not restricted).
+	_, err = db.Exec(`INSERT INTO student_teacher_assignment (enrollment_id, student_id, teacher_id, start_date, status) VALUES (1, 1, 2, '2026-01-01', 'PAUSED')`)
+	if err != nil {
+		t.Fatalf("insert PAUSED assignment for same enrollment should succeed: %v", err)
+	}
+}
+
+// TestM2AssignmentConcurrentActiveDuplicate verifies that concurrent inserts
+// of ACTIVE assignments for the same enrollment result in exactly one success.
+func TestM2AssignmentConcurrentActiveDuplicate(t *testing.T) {
+	tmpDir := t.TempDir()
+	dsn := "file:" + filepath.Join(tmpDir, "test.db")
+
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer db.Close()
+
+	db.SetMaxOpenConns(10)
+	if _, err := db.Exec(`PRAGMA journal_mode = WAL`); err != nil {
+		t.Fatalf("set WAL: %v", err)
+	}
+	if _, err := db.Exec(`PRAGMA busy_timeout = 5000`); err != nil {
+		t.Fatalf("set busy timeout: %v", err)
+	}
+
+	migrationsDir := filepath.Join("..", "..", "..", "migrations")
+	if err := database.MigrateUp(db, migrationsDir); err != nil {
+		t.Fatalf("migrate up: %v", err)
+	}
+
+	// Setup prerequisite data.
+	_, _ = db.Exec(`INSERT INTO course_domain (name, code, type) VALUES ('JP', 'JP', 'LANGUAGE')`)
+	_, _ = db.Exec(`INSERT INTO course_track (domain_id, name, code) VALUES (1, 'JLPT', 'JLPT')`)
+	_, _ = db.Exec(`INSERT INTO student (name) VALUES ('Student1')`)
+	for i := 1; i <= 5; i++ {
+		_, _ = db.Exec(fmt.Sprintf(`INSERT INTO teacher (name) VALUES ('Teacher%d')`, i))
+	}
+	_, _ = db.Exec(`INSERT INTO student_course_enrollment (student_id, domain_id, track_id) VALUES (1, 1, 1)`)
+
+	const goroutines = 5
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	successes := 0
+	failures := 0
+
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			_, err := db.Exec(`INSERT INTO student_teacher_assignment (enrollment_id, student_id, teacher_id, start_date) VALUES (1, 1, ?, '2026-01-01')`, idx+1)
+			mu.Lock()
+			if err != nil {
+				failures++
+			} else {
+				successes++
+			}
+			mu.Unlock()
+		}(i)
+	}
+	wg.Wait()
+
+	if successes != 1 {
+		t.Fatalf("expected exactly 1 concurrent ACTIVE assignment success, got %d (failures=%d)", successes, failures)
+	}
+	if failures != goroutines-1 {
+		t.Fatalf("expected %d concurrent failures, got %d", goroutines-1, failures)
+	}
+}

@@ -185,8 +185,8 @@ CREATE TABLE teacher_capability (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   teacher_id INTEGER NOT NULL REFERENCES teacher(id),
   domain_id INTEGER NOT NULL REFERENCES course_domain(id),
-  track_id INTEGER REFERENCES course_track(id),
-  level_id INTEGER REFERENCES course_level(id),
+  track_id INTEGER NOT NULL REFERENCES course_track(id),
+  level_id INTEGER NOT NULL REFERENCES course_level(id),
   skill_tag_codes TEXT,
   status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK(status IN ('ACTIVE','PAUSED','ENDED')),
   verified INTEGER NOT NULL DEFAULT 0,
@@ -242,3 +242,5 @@ CREATE TABLE student_teacher_assignment (
 CREATE INDEX idx_assign_enrollment ON student_teacher_assignment(enrollment_id);
 CREATE INDEX idx_assign_teacher ON student_teacher_assignment(teacher_id);
 CREATE INDEX idx_assign_status ON student_teacher_assignment(status);
+-- Each enrollment may have at most one ACTIVE assignment at any time.
+CREATE UNIQUE INDEX idx_assign_enrollment_active ON student_teacher_assignment(enrollment_id) WHERE status = 'ACTIVE';
