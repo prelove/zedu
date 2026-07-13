@@ -20,6 +20,8 @@ const (
 	CodeNotFound     ErrorCode = 40401
 	CodeConflict     ErrorCode = 40901
 	CodeInvalidState ErrorCode = 42201
+	CodeInternal     ErrorCode = 50001
+	CodeDatabase     ErrorCode = 50002
 )
 
 // successEnvelope is the unified success response outer structure.

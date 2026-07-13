@@ -91,6 +91,8 @@ func TestErrorCodesMapping(t *testing.T) {
 		{httpserver.CodeNotFound, http.StatusNotFound},
 		{httpserver.CodeConflict, http.StatusConflict},
 		{httpserver.CodeInvalidState, http.StatusUnprocessableEntity},
+		{httpserver.CodeInternal, http.StatusInternalServerError},
+		{httpserver.CodeDatabase, http.StatusInternalServerError},
 	}
 
 	for _, tc := range tests {

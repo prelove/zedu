@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -29,11 +30,37 @@ const maxLoginFailures = 5
 // lockoutDuration is how long an account is locked after too many failures.
 const lockoutDuration = 15 * time.Minute
 
+// Tx is the minimal transaction interface used by the auth Handler.
+// *sql.Tx satisfies this interface; tests may provide a wrapper to inject
+// failures on specific query types within a transaction.
+type Tx interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	Commit() error
+	Rollback() error
+}
+
+// dbAdapter wraps *sql.DB to satisfy the DB interface by converting
+// *sql.Tx returned by BeginTx into the Tx interface.
+type dbAdapter struct {
+	*sql.DB
+}
+
+func (a *dbAdapter) BeginTx(ctx context.Context, opts *sql.TxOptions) (Tx, error) {
+	tx, err := a.DB.BeginTx(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	return tx, nil
+}
+
 // DB is the minimal database interface used by the auth Handler.
-// *sql.DB satisfies this interface; tests may provide a wrapper to inject
-// failures on specific query types.
+// *sql.DB does NOT directly satisfy this interface (BeginTx returns *sql.Tx,
+// not Tx); use NewHandler which wraps *sql.DB in a dbAdapter. Test wrappers
+// that implement DB directly are also accepted.
 type DB interface {
-	BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error)
+	BeginTx(ctx context.Context, opts *sql.TxOptions) (Tx, error)
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
@@ -46,9 +73,18 @@ type Handler struct {
 	logger    *slog.Logger
 }
 
-// NewHandler creates a new auth handler.
-func NewHandler(db DB, jwtSecret string, logger *slog.Logger) *Handler {
-	return &Handler{db: db, jwtSecret: jwtSecret, logger: logger}
+// NewHandler creates a new auth handler. db may be *sql.DB (wrapped in a
+// dbAdapter) or any type that directly implements the DB interface (used by
+// tests for fault injection).
+func NewHandler(db any, jwtSecret string, logger *slog.Logger) *Handler {
+	switch d := db.(type) {
+	case DB:
+		return &Handler{db: d, jwtSecret: jwtSecret, logger: logger}
+	case *sql.DB:
+		return &Handler{db: &dbAdapter{d}, jwtSecret: jwtSecret, logger: logger}
+	default:
+		panic(fmt.Sprintf("NewHandler: unsupported db type %T", db))
+	}
 }
 
 // MountRoutes mounts auth routes onto the given mux. It returns the mux
@@ -84,6 +120,37 @@ type LoginResponse struct {
 	Role        string `json:"role"`
 }
 
+// writeDBError writes a 500 + 50002 response for database/transaction failures.
+func (h *Handler) writeDBError(w http.ResponseWriter, r *http.Request, msg string, err error) {
+	rid := httpserver.RequestIDFromContext(r.Context())
+	h.logger.Error(msg,
+		slog.String("request_id", rid),
+		slog.Any("error", err),
+	)
+	httpserver.WriteErrorFromContext(w, r, http.StatusInternalServerError, httpserver.CodeDatabase, "DATABASE_ERROR")
+}
+
+// writeInternalError writes a 500 + 50001 response for non-database internal failures.
+func (h *Handler) writeInternalError(w http.ResponseWriter, r *http.Request, msg string, err error) {
+	rid := httpserver.RequestIDFromContext(r.Context())
+	h.logger.Error(msg,
+		slog.String("request_id", rid),
+		slog.Any("error", err),
+	)
+	httpserver.WriteErrorFromContext(w, r, http.StatusInternalServerError, httpserver.CodeInternal, "INTERNAL_ERROR")
+}
+
+// insertAuditLog inserts an operation_log row within the given transaction.
+// detail must not contain password, hash, token, or Authorization values.
+func insertAuditLog(tx Tx, ctx context.Context, actorID int64, actorName, action, targetType string, targetID int64, detailJSON, requestID string) error {
+	_, err := tx.ExecContext(ctx,
+		`INSERT INTO operation_log (operator_id, operator_name, action, target_type, target_id, detail_json, request_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		actorID, actorName, action, targetType, targetID, detailJSON, requestID,
+	)
+	return err
+}
+
 // Login handles POST /auth/login.
 func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	rid := httpserver.RequestIDFromContext(r.Context())
@@ -100,21 +167,20 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		passwordHash string
 		role         string
 		status       string
+		username     string
 		lockedUntil  *time.Time
 	)
 	err := h.db.QueryRowContext(r.Context(),
-		`SELECT id, password_hash, role, status, locked_until FROM user_account WHERE username = ?`,
+		`SELECT id, username, password_hash, role, status, locked_until FROM user_account WHERE username = ?`,
 		req.Username,
-	).Scan(&id, &passwordHash, &role, &status, &lockedUntil)
+	).Scan(&id, &username, &passwordHash, &role, &status, &lockedUntil)
 
 	// Same error for unknown user and wrong password — do not disclose account existence.
 	authFailedCode := httpserver.CodeLoginFailed
 	authFailedMsg := "LOGIN_FAILED"
 
 	if err == sql.ErrNoRows {
-		// Dummy bcrypt compare to reduce timing-based user enumeration (P2.3).
 		auth.VerifyPasswordDummy(req.Password)
-		// Do not log the username — it is a user-supplied sensitive identifier.
 		h.logger.Info("login failed: unknown user",
 			slog.String("request_id", rid),
 		)
@@ -122,11 +188,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		h.logger.Error("login query error",
-			slog.String("request_id", rid),
-			slog.Any("error", err),
-		)
-		httpserver.WriteErrorFromContext(w, r, http.StatusUnauthorized, authFailedCode, authFailedMsg)
+		h.writeDBError(w, r, "login query error", err)
 		return
 	}
 
@@ -142,7 +204,6 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 
 	// Check if account is active.
 	if status != "ACTIVE" {
-		// Same error as wrong password — don't disclose that account is disabled.
 		h.logger.Info("login failed: account not active",
 			slog.String("request_id", rid),
 			slog.Int64("user_id", id),
@@ -153,11 +214,6 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 
 	// Verify password.
 	if !auth.VerifyPassword(passwordHash, req.Password) {
-		// Atomic increment + conditional lock in a single UPDATE ... RETURNING.
-		// This avoids the read-modify-write race where concurrent requests all
-		// read the same stale count and overwrite each other, bypassing the
-		// 5th-failure lockout. RETURNING lets us get the new count and locked_until
-		// in the same round-trip, and the Scan error tells us if the write failed.
 		lockTime := time.Now().UTC().Add(lockoutDuration)
 		var (
 			newFailCount   int
@@ -173,17 +229,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		).Scan(&newFailCount, &newLockedUntil)
 
 		if err != nil {
-			// The atomic update failed (DB busy, connection lost, etc.).
-			// Do NOT return 40102 — that would let the caller believe the
-			// password was wrong while the fail counter was never incremented,
-			// allowing unlimited bypass of the lockout. Return a 500-level
-			// internal error instead.
-			h.logger.Error("login fail count update error",
-				slog.String("request_id", rid),
-				slog.Int64("user_id", id),
-				slog.Any("error", err),
-			)
-			httpserver.WriteErrorFromContext(w, r, http.StatusInternalServerError, httpserver.CodeInvalidState, "INTERNAL_ERROR")
+			h.writeDBError(w, r, "login fail count update error", err)
 			return
 		}
 
@@ -206,50 +252,61 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Reset fail count on successful login.
-	_, _ = h.db.ExecContext(r.Context(),
-		`UPDATE user_account SET login_fail_count = 0, locked_until = NULL, last_login_at = ? WHERE id = ?`,
-		time.Now().UTC(), id,
-	)
-
-	// Issue access token.
-	accessToken, err := auth.SignAccessToken(h.jwtSecret, id, role, accessTokenDuration)
-	if err != nil {
-		h.logger.Error("sign access token",
-			slog.String("request_id", rid),
-			slog.Any("error", err),
-		)
-		httpserver.WriteErrorFromContext(w, r, http.StatusUnauthorized, authFailedCode, authFailedMsg)
-		return
-	}
-
-	// Issue refresh token.
+	// === Successful login: reset fail count + insert refresh session + audit in one transaction ===
 	refreshToken, err := auth.GenerateRefreshToken()
 	if err != nil {
-		h.logger.Error("generate refresh token",
-			slog.String("request_id", rid),
-			slog.Any("error", err),
-		)
-		httpserver.WriteErrorFromContext(w, r, http.StatusUnauthorized, authFailedCode, authFailedMsg)
+		h.writeInternalError(w, r, "generate refresh token", err)
+		return
+	}
+	refreshHash := auth.HashRefreshToken(refreshToken)
+	expiresAt := time.Now().UTC().Add(refreshTokenDuration)
+	now := time.Now().UTC()
+
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		h.writeDBError(w, r, "login begin tx", err)
 		return
 	}
 
-	refreshHash := auth.HashRefreshToken(refreshToken)
-	expiresAt := time.Now().UTC().Add(refreshTokenDuration)
-	_, err = h.db.ExecContext(r.Context(),
+	_, err = tx.ExecContext(r.Context(),
+		`UPDATE user_account SET login_fail_count = 0, locked_until = NULL, last_login_at = ? WHERE id = ?`,
+		now, id,
+	)
+	if err != nil {
+		_ = tx.Rollback()
+		h.writeDBError(w, r, "login reset fail count", err)
+		return
+	}
+
+	_, err = tx.ExecContext(r.Context(),
 		`INSERT INTO refresh_session (user_id, token_hash, expires_at) VALUES (?, ?, ?)`,
 		id, refreshHash, expiresAt,
 	)
 	if err != nil {
-		h.logger.Error("insert refresh session",
-			slog.String("request_id", rid),
-			slog.Any("error", err),
-		)
-		httpserver.WriteErrorFromContext(w, r, http.StatusUnauthorized, authFailedCode, authFailedMsg)
+		_ = tx.Rollback()
+		h.writeDBError(w, r, "login insert refresh session", err)
 		return
 	}
 
-	// Set refresh cookie.
+	detail := `{"action":"login"}`
+	if err := insertAuditLog(tx, r.Context(), id, username, "LOGIN", "USER", id, detail, rid); err != nil {
+		_ = tx.Rollback()
+		h.writeDBError(w, r, "login audit log", err)
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		h.writeDBError(w, r, "login commit", err)
+		return
+	}
+
+	// Issue access token (after tx committed; JWT is stateless).
+	accessToken, err := auth.SignAccessToken(h.jwtSecret, id, role, accessTokenDuration)
+	if err != nil {
+		h.writeInternalError(w, r, "sign access token", err)
+		return
+	}
+
 	http.SetCookie(w, &http.Cookie{
 		Name:     RefreshCookieName,
 		Value:    refreshToken,
@@ -274,8 +331,8 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 
 // Refresh handles POST /auth/refresh. Reads refresh token from cookie,
 // rotates it in a single transaction, and returns a new access token.
-// The rotation is atomic: revoke old session (conditional on revoked_at IS NULL)
-// and insert new session in one BeginTx. Concurrent requests with the same
+// The rotation is atomic: ACTIVE check, revoke old session, insert new session,
+// and audit log are all in one BeginTx. Concurrent requests with the same
 // token will see rows-affected=0 on the conditional UPDATE and be rejected.
 func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 	rid := httpserver.RequestIDFromContext(r.Context())
@@ -294,28 +351,24 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 		sessionID int64
 		userID    int64
 		role      string
-		status    string
+		username  string
 		revokedAt *time.Time
 		expiresAt time.Time
 	)
 	err = h.db.QueryRowContext(r.Context(),
-		`SELECT rs.id, rs.user_id, ua.role, ua.status, rs.revoked_at, rs.expires_at
+		`SELECT rs.id, rs.user_id, ua.role, ua.username, rs.revoked_at, rs.expires_at
 		 FROM refresh_session rs
 		 JOIN user_account ua ON ua.id = rs.user_id
 		 WHERE rs.token_hash = ?`,
 		refreshHash,
-	).Scan(&sessionID, &userID, &role, &status, &revokedAt, &expiresAt)
+	).Scan(&sessionID, &userID, &role, &username, &revokedAt, &expiresAt)
 
 	if err == sql.ErrNoRows {
 		httpserver.WriteErrorFromContext(w, r, http.StatusUnauthorized, httpserver.CodeUnauth, "AUTH_REQUIRED")
 		return
 	}
 	if err != nil {
-		h.logger.Error("refresh query error",
-			slog.String("request_id", rid),
-			slog.Any("error", err),
-		)
-		httpserver.WriteErrorFromContext(w, r, http.StatusUnauthorized, httpserver.CodeUnauth, "AUTH_REQUIRED")
+		h.writeDBError(w, r, "refresh query error", err)
 		return
 	}
 
@@ -331,34 +384,42 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check if account is still active.
-	if status != "ACTIVE" {
-		// Revoke the session (best-effort, no tx needed for read-only reject).
-		_, _ = h.db.ExecContext(r.Context(),
-			`UPDATE refresh_session SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL`,
-			time.Now().UTC(), sessionID,
-		)
-		httpserver.WriteErrorFromContext(w, r, http.StatusUnauthorized, httpserver.CodeUnauth, "AUTH_REQUIRED")
-		return
-	}
-
 	// Generate new refresh token (crypto rand, safe outside tx).
 	newRefreshToken, err := auth.GenerateRefreshToken()
 	if err != nil {
-		httpserver.WriteErrorFromContext(w, r, http.StatusInternalServerError, httpserver.CodeUnauth, "AUTH_REQUIRED")
+		h.writeInternalError(w, r, "generate refresh token", err)
 		return
 	}
 	newRefreshHash := auth.HashRefreshToken(newRefreshToken)
 	newExpiresAt := time.Now().UTC().Add(refreshTokenDuration)
+	now := time.Now().UTC()
 
 	// Atomic rotation: single transaction.
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
-		h.logger.Error("begin tx for refresh rotation",
-			slog.String("request_id", rid),
-			slog.Any("error", err),
+		h.writeDBError(w, r, "refresh begin tx", err)
+		return
+	}
+
+	// Re-check ACTIVE status inside the transaction (don't trust outside read).
+	var status string
+	err = tx.QueryRowContext(r.Context(),
+		`SELECT status FROM user_account WHERE id = ?`,
+		userID,
+	).Scan(&status)
+	if err != nil {
+		_ = tx.Rollback()
+		h.writeDBError(w, r, "refresh active check", err)
+		return
+	}
+	if status != "ACTIVE" {
+		_ = tx.Rollback()
+		// Revoke the session inside the same tx for consistency.
+		_, _ = tx.ExecContext(r.Context(),
+			`UPDATE refresh_session SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL`,
+			now, sessionID,
 		)
-		httpserver.WriteErrorFromContext(w, r, http.StatusInternalServerError, httpserver.CodeUnauth, "AUTH_REQUIRED")
+		httpserver.WriteErrorFromContext(w, r, http.StatusUnauthorized, httpserver.CodeUnauth, "AUTH_REQUIRED")
 		return
 	}
 
@@ -366,20 +427,15 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 	// already revoked it, rows-affected will be 0 and we roll back.
 	res, err := tx.ExecContext(r.Context(),
 		`UPDATE refresh_session SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL`,
-		time.Now().UTC(), sessionID,
+		now, sessionID,
 	)
 	if err != nil {
 		_ = tx.Rollback()
-		h.logger.Error("revoke old session in tx",
-			slog.String("request_id", rid),
-			slog.Any("error", err),
-		)
-		httpserver.WriteErrorFromContext(w, r, http.StatusInternalServerError, httpserver.CodeUnauth, "AUTH_REQUIRED")
+		h.writeDBError(w, r, "refresh revoke old session", err)
 		return
 	}
 	rowsAffected, _ := res.RowsAffected()
 	if rowsAffected != 1 {
-		// Another request already rotated this token.
 		_ = tx.Rollback()
 		httpserver.WriteErrorFromContext(w, r, http.StatusUnauthorized, httpserver.CodeUnauth, "AUTH_REQUIRED")
 		return
@@ -392,27 +448,27 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 	)
 	if err != nil {
 		_ = tx.Rollback()
-		h.logger.Error("insert new session in tx",
-			slog.String("request_id", rid),
-			slog.Any("error", err),
-		)
-		httpserver.WriteErrorFromContext(w, r, http.StatusInternalServerError, httpserver.CodeUnauth, "AUTH_REQUIRED")
+		h.writeDBError(w, r, "refresh insert new session", err)
+		return
+	}
+
+	// Audit log in the same transaction.
+	detail := `{"action":"refresh"}`
+	if err := insertAuditLog(tx, r.Context(), userID, username, "REFRESH", "SESSION", sessionID, detail, rid); err != nil {
+		_ = tx.Rollback()
+		h.writeDBError(w, r, "refresh audit log", err)
 		return
 	}
 
 	if err := tx.Commit(); err != nil {
-		h.logger.Error("commit refresh rotation",
-			slog.String("request_id", rid),
-			slog.Any("error", err),
-		)
-		httpserver.WriteErrorFromContext(w, r, http.StatusInternalServerError, httpserver.CodeUnauth, "AUTH_REQUIRED")
+		h.writeDBError(w, r, "refresh commit", err)
 		return
 	}
 
 	// Issue new access token (after tx committed; JWT is stateless).
 	accessToken, err := auth.SignAccessToken(h.jwtSecret, userID, role, accessTokenDuration)
 	if err != nil {
-		httpserver.WriteErrorFromContext(w, r, http.StatusInternalServerError, httpserver.CodeUnauth, "AUTH_REQUIRED")
+		h.writeInternalError(w, r, "sign access token", err)
 		return
 	}
 
@@ -432,18 +488,80 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// Logout handles POST /auth/logout. Revokes the refresh session from the cookie.
+// Logout handles POST /auth/logout. Revokes the refresh session from the cookie
+// and writes an audit log entry in the same transaction. If the DB write fails,
+// does not return success and does not clear the cookie.
 func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
-	cookie, err := r.Cookie(RefreshCookieName)
-	if err == nil && cookie.Value != "" {
-		refreshHash := auth.HashRefreshToken(cookie.Value)
-		_, _ = h.db.ExecContext(r.Context(),
-			`UPDATE refresh_session SET revoked_at = ? WHERE token_hash = ? AND revoked_at IS NULL`,
-			time.Now().UTC(), refreshHash,
-		)
+	rid := httpserver.RequestIDFromContext(r.Context())
+	user, ok := httpserver.UserFromContext(r.Context())
+	if !ok {
+		httpserver.WriteErrorFromContext(w, r, http.StatusUnauthorized, httpserver.CodeUnauth, "AUTH_REQUIRED")
+		return
 	}
 
-	// Clear the cookie.
+	cookie, err := r.Cookie(RefreshCookieName)
+	if err != nil || cookie.Value == "" {
+		// No cookie — still write audit and return success (idempotent logout).
+		tx, err := h.db.BeginTx(r.Context(), nil)
+		if err != nil {
+			h.writeDBError(w, r, "logout begin tx", err)
+			return
+		}
+		detail := `{"action":"logout","reason":"no_cookie"}`
+		if err := insertAuditLog(tx, r.Context(), user.UserID, "", "LOGOUT", "USER", user.UserID, detail, rid); err != nil {
+			_ = tx.Rollback()
+			h.writeDBError(w, r, "logout audit log", err)
+			return
+		}
+		if err := tx.Commit(); err != nil {
+			h.writeDBError(w, r, "logout commit", err)
+			return
+		}
+		// Clear cookie and return success.
+		http.SetCookie(w, &http.Cookie{
+			Name: RefreshCookieName, Value: "", Path: "/auth", MaxAge: -1,
+			HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode,
+		})
+		httpserver.WriteSuccess(w, http.StatusOK, map[string]any{"ok": true})
+		return
+	}
+
+	refreshHash := auth.HashRefreshToken(cookie.Value)
+	now := time.Now().UTC()
+
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		h.writeDBError(w, r, "logout begin tx", err)
+		return
+	}
+
+	// Revoke the session.
+	_, err = tx.ExecContext(r.Context(),
+		`UPDATE refresh_session SET revoked_at = ? WHERE token_hash = ? AND revoked_at IS NULL`,
+		now, refreshHash,
+	)
+	if err != nil {
+		_ = tx.Rollback()
+		h.writeDBError(w, r, "logout revoke session", err)
+		return
+	}
+	// Even if rowsAffected == 0 (already revoked or not found), we still
+	// write the audit and return success — logout is idempotent.
+
+	// Audit log in the same transaction.
+	detail := `{"action":"logout"}`
+	if err := insertAuditLog(tx, r.Context(), user.UserID, "", "LOGOUT", "USER", user.UserID, detail, rid); err != nil {
+		_ = tx.Rollback()
+		h.writeDBError(w, r, "logout audit log", err)
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		h.writeDBError(w, r, "logout commit", err)
+		return
+	}
+
+	// Clear the cookie only after successful commit.
 	http.SetCookie(w, &http.Cookie{
 		Name:     RefreshCookieName,
 		Value:    "",
@@ -501,7 +619,7 @@ func (h *Handler) handleUsers(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		h.ListUsers(w, r)
 	case http.MethodPost:
-		h.CreateUser(w, r)
+		h.CreateUser(w, r, user)
 	default:
 		httpserver.WriteErrorFromContext(w, r, http.StatusForbidden, httpserver.CodeForbidden, "METHOD_NOT_ALLOWED")
 	}
@@ -513,7 +631,7 @@ func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
 		`SELECT id, username, role, display_name, status, created_at FROM user_account WHERE deleted_at IS NULL ORDER BY id`,
 	)
 	if err != nil {
-		httpserver.WriteErrorFromContext(w, r, http.StatusInternalServerError, httpserver.CodeInvalidState, "INTERNAL_ERROR")
+		h.writeDBError(w, r, "list users query", err)
 		return
 	}
 	defer rows.Close()
@@ -558,7 +676,10 @@ type CreateUserRequest struct {
 // CreateUser handles POST /users (Owner-only). Only OPERATOR accounts can be
 // created via this endpoint; OWNER accounts are created only via onboarding
 // or DB seeding. Password must meet PRD rules (>=8 chars, letter+digit).
-func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
+// The user creation and audit log are in the same transaction.
+func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request, actor httpserver.AuthUser) {
+	rid := httpserver.RequestIDFromContext(r.Context())
+
 	var req CreateUserRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httpserver.WriteErrorFromContext(w, r, http.StatusUnprocessableEntity, httpserver.CodeInvalidState, "INVALID_REQUEST")
@@ -583,7 +704,7 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 
 	hash, err := auth.HashPassword(req.Password)
 	if err != nil {
-		httpserver.WriteErrorFromContext(w, r, http.StatusInternalServerError, httpserver.CodeInvalidState, "INTERNAL_ERROR")
+		h.writeInternalError(w, r, "hash password", err)
 		return
 	}
 
@@ -592,16 +713,36 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		displayName = req.Username
 	}
 
-	result, err := h.db.ExecContext(r.Context(),
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		h.writeDBError(w, r, "create user begin tx", err)
+		return
+	}
+
+	result, err := tx.ExecContext(r.Context(),
 		`INSERT INTO user_account (username, password_hash, role, display_name) VALUES (?, ?, ?, ?)`,
 		req.Username, hash, req.Role, displayName,
 	)
 	if err != nil {
+		_ = tx.Rollback()
 		httpserver.WriteErrorFromContext(w, r, http.StatusConflict, httpserver.CodeConflict, "USERNAME_CONFLICT")
 		return
 	}
 
 	id, _ := result.LastInsertId()
+
+	// Audit log in the same transaction.
+	detail := `{"action":"create_operator","username":"` + req.Username + `"}`
+	if err := insertAuditLog(tx, r.Context(), actor.UserID, "", "CREATE_OPERATOR", "USER", id, detail, rid); err != nil {
+		_ = tx.Rollback()
+		h.writeDBError(w, r, "create user audit log", err)
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		h.writeDBError(w, r, "create user commit", err)
+		return
+	}
 
 	httpserver.WriteSuccess(w, http.StatusCreated, map[string]any{
 		"id":       id,
@@ -611,7 +752,6 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleDisableUser handles POST /users/{id}/disable (Owner-only).
-// Extracts the user ID from the URL path.
 func (h *Handler) handleDisableUser(w http.ResponseWriter, r *http.Request) {
 	userID, ok := extractUserIDFromPath(r.URL.Path, "/users/")
 	if !ok {
@@ -622,8 +762,11 @@ func (h *Handler) handleDisableUser(w http.ResponseWriter, r *http.Request) {
 }
 
 // DisableUser handles POST /users/{id}/disable (Owner-only).
-// Revokes all refresh sessions for the user and sets status to DISABLED.
+// Sets status to DISABLED, revokes all active refresh sessions, and writes
+// an audit log entry — all in the same transaction. If any step fails, the
+// entire operation rolls back, leaving no "disabled but sessions active" state.
 func (h *Handler) DisableUser(w http.ResponseWriter, r *http.Request, userID int64) {
+	rid := httpserver.RequestIDFromContext(r.Context())
 	user, ok := httpserver.UserFromContext(r.Context())
 	if !ok {
 		httpserver.WriteErrorFromContext(w, r, http.StatusUnauthorized, httpserver.CodeUnauth, "AUTH_REQUIRED")
@@ -640,26 +783,54 @@ func (h *Handler) DisableUser(w http.ResponseWriter, r *http.Request, userID int
 		return
 	}
 
+	now := time.Now().UTC()
+
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		h.writeDBError(w, r, "disable begin tx", err)
+		return
+	}
+
 	// Set status to DISABLED.
-	result, err := h.db.ExecContext(r.Context(),
+	result, err := tx.ExecContext(r.Context(),
 		`UPDATE user_account SET status = 'DISABLED' WHERE id = ? AND deleted_at IS NULL`,
 		userID,
 	)
 	if err != nil {
-		httpserver.WriteErrorFromContext(w, r, http.StatusInternalServerError, httpserver.CodeInvalidState, "INTERNAL_ERROR")
+		_ = tx.Rollback()
+		h.writeDBError(w, r, "disable set status", err)
 		return
 	}
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
+		_ = tx.Rollback()
 		httpserver.WriteErrorFromContext(w, r, http.StatusNotFound, httpserver.CodeNotFound, "USER_NOT_FOUND")
 		return
 	}
 
-	// Revoke all refresh sessions.
-	_, _ = h.db.ExecContext(r.Context(),
+	// Revoke all active refresh sessions in the same transaction.
+	_, err = tx.ExecContext(r.Context(),
 		`UPDATE refresh_session SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL`,
-		time.Now().UTC(), userID,
+		now, userID,
 	)
+	if err != nil {
+		_ = tx.Rollback()
+		h.writeDBError(w, r, "disable revoke sessions", err)
+		return
+	}
+
+	// Audit log in the same transaction.
+	detail := `{"action":"disable"}`
+	if err := insertAuditLog(tx, r.Context(), user.UserID, "", "DISABLE_USER", "USER", userID, detail, rid); err != nil {
+		_ = tx.Rollback()
+		h.writeDBError(w, r, "disable audit log", err)
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		h.writeDBError(w, r, "disable commit", err)
+		return
+	}
 
 	httpserver.WriteSuccess(w, http.StatusOK, map[string]any{"id": userID, "status": "DISABLED"})
 }
@@ -670,7 +841,6 @@ func extractUserIDFromPath(path, prefix string) (int64, bool) {
 		return 0, false
 	}
 	rest := path[len(prefix):]
-	// Find the next slash.
 	idx := strings.Index(rest, "/")
 	var idStr string
 	if idx >= 0 {

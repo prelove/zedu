@@ -52,10 +52,12 @@ CREATE TABLE operation_log (
   target_id INTEGER,
   detail_json TEXT,
   ip_addr TEXT,
+  request_id TEXT NOT NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX idx_oplog_target ON operation_log(target_type, target_id);
 CREATE INDEX idx_oplog_created ON operation_log(created_at);
+CREATE INDEX idx_oplog_request_id ON operation_log(request_id);
 
 -- ========== Course System (configurable dictionary) ==========
 
