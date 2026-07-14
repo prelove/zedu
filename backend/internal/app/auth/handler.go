@@ -268,13 +268,32 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err = tx.ExecContext(r.Context(),
-		`UPDATE user_account SET login_fail_count = 0, locked_until = NULL, last_login_at = ? WHERE id = ?`,
+	// Reset fail count — conditional on status='ACTIVE' to prevent the race
+	// where the account is disabled between the outside read and this tx.
+	// If rows-affected is 0, the account was disabled concurrently.
+	res, err := tx.ExecContext(r.Context(),
+		`UPDATE user_account SET login_fail_count = 0, locked_until = NULL, last_login_at = ? WHERE id = ? AND status = 'ACTIVE'`,
 		now, id,
 	)
 	if err != nil {
 		_ = tx.Rollback()
 		h.writeDBError(w, r, "login reset fail count", err)
+		return
+	}
+	loginRows, err := res.RowsAffected()
+	if err != nil {
+		_ = tx.Rollback()
+		h.writeDBError(w, r, "login reset fail count rows-affected", err)
+		return
+	}
+	if loginRows != 1 {
+		// Account was disabled (or deleted) between the outside read and this tx.
+		_ = tx.Rollback()
+		h.logger.Info("login failed: account disabled during tx",
+			slog.String("request_id", rid),
+			slog.Int64("user_id", id),
+		)
+		httpserver.WriteErrorFromContext(w, r, http.StatusUnauthorized, authFailedCode, authFailedMsg)
 		return
 	}
 
@@ -414,11 +433,6 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 	}
 	if status != "ACTIVE" {
 		_ = tx.Rollback()
-		// Revoke the session inside the same tx for consistency.
-		_, _ = tx.ExecContext(r.Context(),
-			`UPDATE refresh_session SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL`,
-			now, sessionID,
-		)
 		httpserver.WriteErrorFromContext(w, r, http.StatusUnauthorized, httpserver.CodeUnauth, "AUTH_REQUIRED")
 		return
 	}
@@ -434,7 +448,12 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 		h.writeDBError(w, r, "refresh revoke old session", err)
 		return
 	}
-	rowsAffected, _ := res.RowsAffected()
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		_ = tx.Rollback()
+		h.writeDBError(w, r, "refresh revoke rows-affected", err)
+		return
+	}
 	if rowsAffected != 1 {
 		_ = tx.Rollback()
 		httpserver.WriteErrorFromContext(w, r, http.StatusUnauthorized, httpserver.CodeUnauth, "AUTH_REQUIRED")
@@ -589,7 +608,11 @@ func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 		user.UserID,
 	).Scan(&username, &role, &displayName)
 	if err != nil {
-		httpserver.WriteErrorFromContext(w, r, http.StatusNotFound, httpserver.CodeNotFound, "NOT_FOUND")
+		if err == sql.ErrNoRows {
+			httpserver.WriteErrorFromContext(w, r, http.StatusNotFound, httpserver.CodeNotFound, "NOT_FOUND")
+			return
+		}
+		h.writeDBError(w, r, "me query error", err)
 		return
 	}
 
@@ -648,9 +671,14 @@ func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
 		var u UserItem
 		var createdAt string
 		if err := rows.Scan(&u.ID, &u.Username, &u.Role, &u.DisplayName, &u.Status, &createdAt); err != nil {
-			continue
+			h.writeDBError(w, r, "list users scan", err)
+			return
 		}
 		items = append(items, u)
+	}
+	if err := rows.Err(); err != nil {
+		h.writeDBError(w, r, "list users rows err", err)
+		return
 	}
 
 	if items == nil {
@@ -725,11 +753,22 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request, actor https
 	)
 	if err != nil {
 		_ = tx.Rollback()
-		httpserver.WriteErrorFromContext(w, r, http.StatusConflict, httpserver.CodeConflict, "USERNAME_CONFLICT")
+		// Only map confirmed unique-constraint violations to 40901.
+		// All other INSERT/tx errors must be 50002.
+		if isUniqueConstraintError(err) {
+			httpserver.WriteErrorFromContext(w, r, http.StatusConflict, httpserver.CodeConflict, "USERNAME_CONFLICT")
+			return
+		}
+		h.writeDBError(w, r, "create user insert", err)
 		return
 	}
 
-	id, _ := result.LastInsertId()
+	id, err := result.LastInsertId()
+	if err != nil {
+		_ = tx.Rollback()
+		h.writeDBError(w, r, "create user last insert id", err)
+		return
+	}
 
 	// Audit log in the same transaction.
 	detail := `{"action":"create_operator","username":"` + req.Username + `"}`
@@ -801,7 +840,12 @@ func (h *Handler) DisableUser(w http.ResponseWriter, r *http.Request, userID int
 		h.writeDBError(w, r, "disable set status", err)
 		return
 	}
-	rows, _ := result.RowsAffected()
+	rows, err := result.RowsAffected()
+	if err != nil {
+		_ = tx.Rollback()
+		h.writeDBError(w, r, "disable rows-affected", err)
+		return
+	}
 	if rows == 0 {
 		_ = tx.Rollback()
 		httpserver.WriteErrorFromContext(w, r, http.StatusNotFound, httpserver.CodeNotFound, "USER_NOT_FOUND")
@@ -853,4 +897,14 @@ func extractUserIDFromPath(path, prefix string) (int64, bool) {
 		return 0, false
 	}
 	return id, true
+}
+
+// isUniqueConstraintError returns true if err is a SQLite UNIQUE constraint
+// violation. This is used to distinguish 40901 conflicts from other DB errors.
+func isUniqueConstraintError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "UNIQUE constraint failed")
 }

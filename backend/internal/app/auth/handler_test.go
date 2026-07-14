@@ -286,7 +286,7 @@ func TestRefreshTokenRotation(t *testing.T) {
 		t.Fatalf("no refresh cookie after login")
 	}
 
-	// Refresh — should return new access token and new refresh cookie.
+	// Refresh 窶・should return new access token and new refresh cookie.
 	code, body, resp2 := doRequest(t, "POST", ts.srv.URL+"/auth/refresh", nil, cookie)
 	if code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%v", code, body)
@@ -304,7 +304,7 @@ func TestRefreshTokenRotation(t *testing.T) {
 		t.Fatalf("expected new refresh cookie after rotation")
 	}
 	if newCookie.Value == cookie.Value {
-		t.Fatalf("refresh token must rotate — new cookie same as old")
+		t.Fatalf("refresh token must rotate 窶・new cookie same as old")
 	}
 }
 
@@ -327,7 +327,7 @@ func TestRefreshOldTokenReplayFails(t *testing.T) {
 		t.Fatalf("no new cookie after refresh")
 	}
 
-	// Replay old cookie — must fail.
+	// Replay old cookie 窶・must fail.
 	code, body, _ := doRequest(t, "POST", ts.srv.URL+"/auth/refresh", nil, oldCookie)
 	if code != http.StatusUnauthorized {
 		t.Fatalf("expected 401 for replayed old refresh token, got %d", code)
@@ -418,7 +418,7 @@ func TestOperatorDeniedOwnerOnlyAPI(t *testing.T) {
 
 	opToken := loginAndGetToken(t, ts, "op1", "Pass1234")
 
-	// Operator tries to list users — Owner-only.
+	// Operator tries to list users 窶・Owner-only.
 	code, body, _ := doRequestWithToken(t, "GET", ts.srv.URL+"/users", opToken, nil)
 	if code != http.StatusForbidden {
 		t.Fatalf("expected 403, got %d", code)
@@ -897,7 +897,7 @@ func TestLoginFailCountUpdateErrorDoesNotReturn40102(t *testing.T) {
 	code, body, _ := doRequest(t, "POST", srv.URL+"/auth/login",
 		map[string]string{"username": "victim", "password": "wrongpass1"}, nil)
 
-	// Must NOT be 40102 (LOGIN_FAILED) — that would mask the DB error.
+	// Must NOT be 40102 (LOGIN_FAILED) 窶・that would mask the DB error.
 	if code == http.StatusUnauthorized && body != nil && body["code"] == float64(40102) {
 		t.Fatalf("must not return 40102 when fail-count UPDATE fails; got code=40102 body=%v", body)
 	}
@@ -962,7 +962,7 @@ func (f *failingUpdateDB) ExecContext(ctx context.Context, query string, args ..
 
 func (f *failingUpdateDB) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
 	if strings.Contains(strings.ToUpper(query), "UPDATE") {
-		// Return a Row from a closed DB — Scan will fail with "sql: database is closed".
+		// Return a Row from a closed DB 窶・Scan will fail with "sql: database is closed".
 		return f.closedDB.QueryRowContext(ctx, "SELECT 1")
 	}
 	return f.db.QueryRowContext(ctx, query, args...)
@@ -1012,7 +1012,7 @@ func TestRefreshErrorLogIncludesRequestID(t *testing.T) {
 	// This hits the `h.logger.Error("refresh query error", ...)` path.
 	db.Close()
 
-	// Call refresh with the real cookie — the DB query will fail.
+	// Call refresh with the real cookie 窶・the DB query will fail.
 	req, _ := http.NewRequest("POST", srv.URL+"/auth/refresh", nil)
 	req.AddCookie(cookie)
 	resp, err := http.DefaultClient.Do(req)
@@ -1077,7 +1077,7 @@ func TestAuthBypassRemovedFailingDBRejectsUnauthenticatedME(t *testing.T) {
 	srv := httptest.NewServer(wrapped)
 	defer srv.Close()
 
-	// No Authorization header → must get 401 / 40101.
+	// No Authorization header 竊・must get 401 / 40101.
 	req, _ := http.NewRequest("GET", srv.URL+"/auth/me", nil)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -1128,7 +1128,7 @@ func TestAuthBypassRemovedFailingDBRejectsUnauthenticatedUsers(t *testing.T) {
 	srv := httptest.NewServer(wrapped)
 	defer srv.Close()
 
-	// No Authorization header → must get 401 / 40101.
+	// No Authorization header 竊・must get 401 / 40101.
 	req, _ := http.NewRequest("GET", srv.URL+"/users", nil)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -1187,7 +1187,7 @@ func TestAuthBypassRemovedFailingDBAuthenticatedMESucceeds(t *testing.T) {
 		t.Fatalf("login failed: no token returned")
 	}
 
-	// GET /auth/me with valid Bearer token → must get 200.
+	// GET /auth/me with valid Bearer token 竊・must get 200.
 	code, body, _ := doRequestWithToken(t, "GET", srv.URL+"/auth/me", token, nil)
 	if code != http.StatusOK {
 		t.Fatalf("expected 200 for authenticated GET /auth/me, got %d body=%v", code, body)
@@ -1564,8 +1564,11 @@ func TestDisableUserWritesAuditLog(t *testing.T) {
 }
 
 // TestLoginAuditFailureRollsBackAll verifies that if the audit log INSERT
-// fails inside the login transaction, the fail count reset and refresh
-// session insertion are also rolled back — no partial writes.
+// (INSERT INTO operation_log) fails inside the login transaction, the fail
+// count reset and refresh session insertion are also rolled back 窶・no partial
+// writes. The refresh_session INSERT must succeed first, proving the test
+// reaches the audit INSERT, not just the session INSERT.
+// Establishes fail_count=1 first, then asserts it remains 1 after rollback.
 func TestLoginAuditFailureRollsBackAll(t *testing.T) {
 	tmpDir := t.TempDir()
 	dsn := "file:" + filepath.Join(tmpDir, "test.db")
@@ -1582,31 +1585,46 @@ func TestLoginAuditFailureRollsBackAll(t *testing.T) {
 
 	createTestUser(t, db, "owner1", "Pass1234", "OWNER", "ACTIVE")
 
-	// First, do a wrong-password login to set fail_count to 1.
-	_, _, _ = doRequestOnCustomServer(t, db, db, "owner1", "wrongpass1",
-		func(h *appauth.Handler, mux *http.ServeMux) {
-			appauth.MountRoutes(mux, h, db)
-		}, "POST", "/auth/login")
+	// Step 1: Do a wrong-password login with the REAL db to set fail_count to 1.
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	handler0 := appauth.NewHandler(db, "test-jwt-secret-for-r7-audit", logger)
+	mux0 := httpserver.New()
+	mux0 = appauth.MountRoutes(mux0, handler0, db)
+	srv0 := httptest.NewServer(logging.NewMiddleware(logger)(mux0))
+
+	req0, _ := http.NewRequest("POST", srv0.URL+"/auth/login",
+		bytes.NewReader([]byte(`{"username":"owner1","password":"wrongpass1"}`)))
+	req0.Header.Set("Content-Type", "application/json")
+	resp0, err := http.DefaultClient.Do(req0)
+	if err != nil {
+		t.Fatalf("wrong-password login: %v", err)
+	}
+	resp0.Body.Close()
+	srv0.Close()
+
+	// Verify fail_count is exactly 1.
 	var failCount int
-	_ = db.QueryRow(`SELECT login_fail_count FROM user_account WHERE username = 'owner1'`).Scan(&failCount)
+	err = db.QueryRow(`SELECT login_fail_count FROM user_account WHERE username = 'owner1'`).Scan(&failCount)
+	if err != nil {
+		t.Fatalf("query fail count: %v", err)
+	}
 	if failCount != 1 {
-		// This is fine — the wrong password login might not have incremented
-		// if the test server setup is different. Just proceed.
+		t.Fatalf("expected fail_count=1 after wrong password, got %d", failCount)
 	}
 
-	// Now use failingInsertDB to make the audit INSERT fail during successful login.
-	closedDB, _ := sql.Open("sqlite", "file:"+filepath.Join(tmpDir, "closed.db"))
-	closedDB.Close()
-	failingDB := &failingInsertDB{db: db, closedDB: closedDB}
+	// Step 2: Use failingAuditDB which only fails INSERT INTO operation_log.
+	// This lets UPDATE user_account and INSERT INTO refresh_session succeed
+	// inside the tx, then fails on the audit INSERT 窶・proving the test
+	// reaches the audit step, not just the session INSERT.
+	failingDB := &failingAuditDB{db: db}
 
-	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	handler := appauth.NewHandler(failingDB, "test-jwt-secret-for-r5-audit", logger)
+	handler := appauth.NewHandler(failingDB, "test-jwt-secret-for-r7-audit", logger)
 	mux := httpserver.New()
 	mux = appauth.MountRoutes(mux, handler, db)
 	srv := httptest.NewServer(logging.NewMiddleware(logger)(mux))
 	defer srv.Close()
 
-	// Attempt successful login — the audit INSERT should fail.
+	// Attempt successful login 窶・the audit INSERT should fail inside the tx.
 	req, _ := http.NewRequest("POST", srv.URL+"/auth/login",
 		bytes.NewReader([]byte(`{"username":"owner1","password":"Pass1234"}`)))
 	req.Header.Set("Content-Type", "application/json")
@@ -1626,30 +1644,35 @@ func TestLoginAuditFailureRollsBackAll(t *testing.T) {
 		t.Fatalf("expected code 50002, got %v", body["code"])
 	}
 
-	// Verify no refresh session was created.
+	// Assert fail_count is STILL 1 (the tx rolled back, so the reset did not persist).
+	var finalFailCount int
+	err = db.QueryRow(`SELECT login_fail_count FROM user_account WHERE username = 'owner1'`).Scan(&finalFailCount)
+	if err != nil {
+		t.Fatalf("query final fail count: %v", err)
+	}
+	if finalFailCount != 1 {
+		t.Fatalf("expected fail_count=1 after rollback (not reset), got %d", finalFailCount)
+	}
+
+	// Assert 0 refresh sessions (the session INSERT succeeded inside the tx
+	// but was rolled back when the audit INSERT failed).
 	var sessionCount int
-	_ = db.QueryRow(`SELECT COUNT(*) FROM refresh_session WHERE user_id = (SELECT id FROM user_account WHERE username = 'owner1')`).Scan(&sessionCount)
+	err = db.QueryRow(`SELECT COUNT(*) FROM refresh_session WHERE user_id = (SELECT id FROM user_account WHERE username = 'owner1')`).Scan(&sessionCount)
+	if err != nil {
+		t.Fatalf("query session count: %v", err)
+	}
 	if sessionCount != 0 {
 		t.Fatalf("expected 0 refresh sessions after rollback, got %d", sessionCount)
 	}
 
-	// Verify no audit log was written.
+	// Assert 0 LOGIN audit rows.
 	var auditCount int
-	_ = db.QueryRow(`SELECT COUNT(*) FROM operation_log WHERE action = 'LOGIN'`).Scan(&auditCount)
+	err = db.QueryRow(`SELECT COUNT(*) FROM operation_log WHERE action = 'LOGIN'`).Scan(&auditCount)
+	if err != nil {
+		t.Fatalf("query audit count: %v", err)
+	}
 	if auditCount != 0 {
 		t.Fatalf("expected 0 LOGIN audit rows after rollback, got %d", auditCount)
-	}
-
-	// Verify fail_count was NOT reset (still 1 from the wrong password attempt,
-	// or 0 if that didn't happen — either way, it should NOT have been reset
-	// to 0 by the failed login transaction).
-	var finalFailCount int
-	_ = db.QueryRow(`SELECT login_fail_count FROM user_account WHERE username = 'owner1'`).Scan(&finalFailCount)
-	// The successful login transaction should have rolled back, so fail_count
-	// should still be whatever it was before (0 or 1), not reset by the failed tx.
-	// We just verify it's not some unexpected value.
-	if finalFailCount < 0 {
-		t.Fatalf("unexpected negative fail count: %d", finalFailCount)
 	}
 }
 
@@ -1693,7 +1716,7 @@ func TestLogoutRevokeFailureDoesNotReturnSuccess(t *testing.T) {
 	srv2 := httptest.NewServer(logging.NewMiddleware(logger)(mux2))
 	defer srv2.Close()
 
-	// Attempt logout — the revoke should fail.
+	// Attempt logout 窶・the revoke should fail.
 	code, body, _ := doRequestWithTokenAndCookie(t, "POST", srv2.URL+"/auth/logout", token, cookie)
 	if code == http.StatusOK {
 		t.Fatalf("must not return 200 when logout revoke fails, got %d body=%v", code, body)
@@ -1713,7 +1736,7 @@ func TestLogoutRevokeFailureDoesNotReturnSuccess(t *testing.T) {
 
 // TestDisableRevokeFailureRollsBack verifies that if the session revoke
 // fails inside the disable transaction, the account status is NOT set to
-// DISABLED — everything rolls back.
+// DISABLED 窶・everything rolls back.
 func TestDisableRevokeFailureRollsBack(t *testing.T) {
 	tmpDir := t.TempDir()
 	dsn := "file:" + filepath.Join(tmpDir, "test.db")
@@ -1753,7 +1776,7 @@ func TestDisableRevokeFailureRollsBack(t *testing.T) {
 	srv2 := httptest.NewServer(logging.NewMiddleware(logger)(mux2))
 	defer srv2.Close()
 
-	// Attempt disable — the session revoke should fail.
+	// Attempt disable 窶・the session revoke should fail.
 	code, body, _ := doRequestWithToken(t, "POST", srv2.URL+"/users/2/disable", ownerToken, nil)
 	if code == http.StatusOK {
 		t.Fatalf("must not return 200 when disable revoke fails, got %d body=%v", code, body)
@@ -1787,41 +1810,125 @@ func TestDisableRevokeFailureRollsBack(t *testing.T) {
 	}
 }
 
-// TestRefreshAndDisableConcurrentNoActiveSession verifies that after a
-// successful disable, the disabled account has no active refresh sessions,
-// even if a concurrent refresh was in flight.
+// TestRefreshAndDisableConcurrentNoActiveSession verifies that when refresh
+// is paused inside its transaction (after the ACTIVE check, before revoking
+// the old session) and disable completes fully, refresh cannot succeed and
+// the disabled account ends up with no active refresh sessions.
+//
+// Uses a channel barrier in a test-only Tx wrapper to create deterministic
+// interleaving: refresh's tx blocks after the ACTIVE check SELECT and before
+// the UPDATE refresh_session (revoke). Disable then commits fully (setting
+// status=DISABLED and revoking all sessions). Refresh is released — its
+// UPDATE ... WHERE revoked_at IS NULL finds rows=0 (disable already revoked),
+// so it rolls back and returns 401.
 func TestRefreshAndDisableConcurrentNoActiveSession(t *testing.T) {
-	ts := newTestServer(t)
-	createTestUser(t, ts.db, "owner1", "Pass1234", "OWNER", "ACTIVE")
-	createTestUser(t, ts.db, "op1", "Pass1234", "OPERATOR", "ACTIVE")
+	tmpDir := t.TempDir()
+	dsn := "file:" + filepath.Join(tmpDir, "test.db")
+	db, err := database.Open(dsn)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+	// Allow 2 concurrent connections so refresh's tx and disable's tx
+	// can both get a connection. WAL mode ensures reads don't block writes.
+	db.SetMaxOpenConns(2)
 
-	// Login op1 to get a refresh cookie.
-	_, _, opLoginResp := doRequest(t, "POST", ts.srv.URL+"/auth/login",
+	migrationsDir := filepath.Join("..", "..", "..", "migrations")
+	if err := database.MigrateUp(db, migrationsDir); err != nil {
+		t.Fatalf("migrate up: %v", err)
+	}
+
+	createTestUser(t, db, "owner1", "Pass1234", "OWNER", "ACTIVE")
+	createTestUser(t, db, "op1", "Pass1234", "OPERATOR", "ACTIVE")
+
+	// Login op1 with real DB to get a refresh cookie.
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	handler0 := appauth.NewHandler(db, "test-jwt-secret-for-r7-race", logger)
+	mux0 := httpserver.New()
+	mux0 = appauth.MountRoutes(mux0, handler0, db)
+	srv0 := httptest.NewServer(logging.NewMiddleware(logger)(mux0))
+
+	_, _, opLoginResp := doRequest(t, "POST", srv0.URL+"/auth/login",
 		map[string]string{"username": "op1", "password": "Pass1234"}, nil)
 	opCookie := extractRefreshCookie(opLoginResp)
 	if opCookie == nil {
 		t.Fatalf("no refresh cookie for op1")
 	}
+	ownerToken := loginAndGetTokenWith(t, srv0, "owner1", "Pass1234")
+	srv0.Close()
 
-	ownerToken := loginAndGetToken(t, ts, "owner1", "Pass1234")
+	// Barrier channels: refresh signals it has completed the ACTIVE check
+	// and is about to revoke; test signals refresh to proceed after disable.
+	reached := make(chan struct{})
+	release := make(chan struct{})
+	done := make(chan struct{})
 
-	// Disable op1.
-	code, body, _ := doRequestWithToken(t, "POST", ts.srv.URL+"/users/2/disable", ownerToken, nil)
-	if code != http.StatusOK {
-		t.Fatalf("expected 200 for disable, got %d body=%v", code, body)
+	barrierDB := &barrierRefreshDB{db: db, reached: reached, release: release}
+
+	handler := appauth.NewHandler(barrierDB, "test-jwt-secret-for-r7-race", logger)
+	mux := httpserver.New()
+	mux = appauth.MountRoutes(mux, handler, db)
+	srv := httptest.NewServer(logging.NewMiddleware(logger)(mux))
+	defer srv.Close()
+
+	// Start refresh in a goroutine — it will block at the barrier
+	// (after ACTIVE check, before revoke UPDATE).
+	var refreshCode int
+	var refreshBody map[string]any
+	go func() {
+		refreshCode, refreshBody, _ = doRequestWithCookie(t, "POST", srv.URL+"/auth/refresh", opCookie)
+		close(done)
+	}()
+
+	// Wait for refresh to reach the barrier.
+	select {
+	case <-reached:
+	case <-time.After(10 * time.Second):
+		t.Fatalf("refresh did not reach barrier within 10s")
 	}
 
-	// Now try to refresh with op1's old cookie — must fail.
-	code2, body2, _ := doRequestWithCookie(t, "POST", ts.srv.URL+"/auth/refresh", opCookie)
-	if code2 == http.StatusOK {
-		t.Fatalf("refresh after disable must not succeed, got 200 body=%v", body2)
+	// Disable op1 (user id=2) while refresh is blocked.
+	// Disable's tx goes through barrierDB.BeginTx -> barrierRefreshTx,
+	// but barrierRefreshTx only blocks on UPDATE refresh_session ... WHERE id = ?
+	// (refresh's revoke pattern), not WHERE user_id = ? (disable's revoke-all).
+	disableCode, disableBody, _ := doRequestWithToken(t, "POST", srv.URL+"/users/2/disable", ownerToken, nil)
+	if disableCode != http.StatusOK {
+		t.Fatalf("disable must succeed, got %d body=%v", disableCode, disableBody)
 	}
 
-	// Verify no active sessions exist for op1.
+	// Release the barrier — refresh continues.
+	close(release)
+
+	// Wait for refresh to complete.
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatalf("refresh did not complete within 10s after release")
+	}
+
+	// Refresh must NOT return 200 — disable already revoked the session.
+	if refreshCode == http.StatusOK {
+		t.Fatalf("refresh must not succeed after disable committed, got 200 body=%v", refreshBody)
+	}
+
+	// Final invariant: no active sessions for the disabled user.
 	var activeCount int
-	_ = ts.db.QueryRow(`SELECT COUNT(*) FROM refresh_session WHERE user_id = 2 AND revoked_at IS NULL`).Scan(&activeCount)
+	err = db.QueryRow(`SELECT COUNT(*) FROM refresh_session WHERE user_id = 2 AND revoked_at IS NULL`).Scan(&activeCount)
+	if err != nil {
+		t.Fatalf("query active sessions: %v", err)
+	}
 	if activeCount != 0 {
 		t.Fatalf("expected 0 active sessions for disabled user, got %d", activeCount)
+	}
+
+	// Account must be DISABLED.
+	var status string
+	err = db.QueryRow(`SELECT status FROM user_account WHERE id = 2`).Scan(&status)
+	if err != nil {
+		t.Fatalf("query status: %v", err)
+	}
+	if status != "DISABLED" {
+		t.Fatalf("expected DISABLED, got %s", status)
 	}
 }
 
@@ -1885,7 +1992,7 @@ func TestFailedLoginNoSuccessAudit(t *testing.T) {
 	ts := newTestServer(t)
 	createTestUser(t, ts.db, "owner1", "Pass1234", "OWNER", "ACTIVE")
 
-	// Wrong password — should fail.
+	// Wrong password 窶・should fail.
 	_, _, _ = doRequest(t, "POST", ts.srv.URL+"/auth/login",
 		map[string]string{"username": "owner1", "password": "wrongpass1"}, nil)
 
@@ -1920,7 +2027,7 @@ func TestConflictRequestNoSuccessAudit(t *testing.T) {
 	createTestUser(t, ts.db, "op1", "Pass1234", "OPERATOR", "ACTIVE")
 	token := loginAndGetToken(t, ts, "owner1", "Pass1234")
 
-	// Try to create op1 again — should conflict.
+	// Try to create op1 again 窶・should conflict.
 	_, body, _ := doRequestWithToken(t, "POST", ts.srv.URL+"/users", token,
 		map[string]string{"username": "op1", "password": "Pass1234", "role": "OPERATOR"})
 	if body == nil || body["code"] != float64(40901) {
@@ -2001,6 +2108,971 @@ func doRequestWithTokenAndCookie(t *testing.T, method, url, token string, cookie
 func doRequestOnCustomServer(t *testing.T, db *sql.DB, failingDB interface{}, username, password string,
 	mountFn func(h *appauth.Handler, mux *http.ServeMux), method, path string) (int, map[string]any, *http.Response) {
 	t.Helper()
-	// This is a simplified helper — not used in the main test flow.
+	// This is a simplified helper 窶・not used in the main test flow.
 	return 0, nil, nil
+}
+
+// ==================== r6: P1-1 Login/disable race 窶・deterministic interleaving ====================
+
+// failingInsertAfterUpdateTx wraps *sql.Tx and lets the first N ExecContext
+// calls pass through, then fails the (N+1)th. This creates a deterministic
+// interleaving point: the UPDATE succeeds (fail count reset) but the INSERT
+// (refresh session) or audit fails, proving the tx rolls back.
+type failingInsertAfterUpdateTx struct {
+	tx        *sql.Tx
+	callCount int
+	failAt    int
+}
+
+func (f *failingInsertAfterUpdateTx) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	f.callCount++
+	if f.callCount == f.failAt {
+		return nil, fmt.Errorf("deterministic failure at call %d", f.failAt)
+	}
+	return f.tx.ExecContext(ctx, query, args...)
+}
+func (f *failingInsertAfterUpdateTx) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
+	return f.tx.QueryRowContext(ctx, query, args...)
+}
+func (f *failingInsertAfterUpdateTx) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	return f.tx.QueryContext(ctx, query, args...)
+}
+func (f *failingInsertAfterUpdateTx) Commit() error {
+	return f.tx.Commit()
+}
+func (f *failingInsertAfterUpdateTx) Rollback() error {
+	return f.tx.Rollback()
+}
+
+// loginRaceTx wraps *sql.Tx. On the first ExecContext (the login tx's
+// UPDATE user_account SET login_fail_count=0 ... WHERE status='ACTIVE'),
+// it FIRST disables the target account via a SEPARATE *sql.DB connection,
+// THEN runs the tx's UPDATE. This creates a deterministic race: the
+// outside read saw ACTIVE, but by the time the tx UPDATE runs, the account
+// is DISABLED.
+//
+// A separate *sql.DB is needed because database.Open sets SetMaxOpenConns(1),
+// so the tx holds the only connection on the main DB. The sideDB is a
+// second connection to the same SQLite file with its own pool.
+type loginRaceTx struct {
+	tx           *sql.Tx
+	sideDB       *sql.DB
+	disabledUser int64
+	disabled     bool
+}
+
+func (f *loginRaceTx) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	if !f.disabled && strings.Contains(query, "UPDATE user_account") {
+		// Disable the account via a separate connection BEFORE the tx's
+		// UPDATE runs. SQLite BEGIN DEFERRED doesn't hold a write lock
+		// until the first write, so the sideDB's UPDATE can acquire and
+		// release the write lock before the tx's UPDATE.
+		_, _ = f.sideDB.ExecContext(ctx,
+			`UPDATE user_account SET status = 'DISABLED' WHERE id = ?`,
+			f.disabledUser,
+		)
+		f.disabled = true
+	}
+	return f.tx.ExecContext(ctx, query, args...)
+}
+func (f *loginRaceTx) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
+	return f.tx.QueryRowContext(ctx, query, args...)
+}
+func (f *loginRaceTx) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	return f.tx.QueryContext(ctx, query, args...)
+}
+func (f *loginRaceTx) Commit() error {
+	return f.tx.Commit()
+}
+func (f *loginRaceTx) Rollback() error {
+	return f.tx.Rollback()
+}
+
+// loginRaceDB wraps *sql.DB. Its BeginTx returns a loginRaceTx that
+// disables the target account before the first tx UPDATE, using a
+// separate sideDB connection to avoid pool deadlock.
+type loginRaceDB struct {
+	db           *sql.DB
+	sideDB       *sql.DB
+	disabledUser int64
+}
+
+func (f *loginRaceDB) BeginTx(ctx context.Context, opts *sql.TxOptions) (appauth.Tx, error) {
+	tx, err := f.db.BeginTx(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	return &loginRaceTx{tx: tx, sideDB: f.sideDB, disabledUser: f.disabledUser}, nil
+}
+func (f *loginRaceDB) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	return f.db.ExecContext(ctx, query, args...)
+}
+func (f *loginRaceDB) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
+	return f.db.QueryRowContext(ctx, query, args...)
+}
+func (f *loginRaceDB) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	return f.db.QueryContext(ctx, query, args...)
+}
+
+// TestLoginDisableRaceNoActiveSession verifies that when an account is
+// disabled between the login's outside read and the login transaction's
+// UPDATE, the login fails (no token/cookie), no refresh session is created,
+// and no LOGIN audit is written. The UPDATE ... WHERE status='ACTIVE' sees
+// rows-affected=0 and rolls back.
+func TestLoginDisableRaceNoActiveSession(t *testing.T) {
+	tmpDir := t.TempDir()
+	dsn := "file:" + filepath.Join(tmpDir, "test.db")
+	db, err := database.Open(dsn)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	migrationsDir := filepath.Join("..", "..", "..", "migrations")
+	if err := database.MigrateUp(db, migrationsDir); err != nil {
+		t.Fatalf("migrate up: %v", err)
+	}
+
+	createTestUser(t, db, "victim", "Pass1234", "OPERATOR", "ACTIVE")
+	var victimID int64
+	_ = db.QueryRow(`SELECT id FROM user_account WHERE username = 'victim'`).Scan(&victimID)
+
+	// Open a separate DB connection to the same SQLite file for the
+	// disable operation. This avoids the SetMaxOpenConns(1) deadlock.
+	sideDB, err := database.Open(dsn)
+	if err != nil {
+		t.Fatalf("open side db: %v", err)
+	}
+	defer sideDB.Close()
+
+	// loginRaceDB will disable the account inside the tx's first UPDATE,
+	// using the sideDB connection to avoid pool deadlock.
+	raceDB := &loginRaceDB{db: db, sideDB: sideDB, disabledUser: victimID}
+
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	handler := appauth.NewHandler(raceDB, "test-jwt-secret-for-r6-race", logger)
+	mux := httpserver.New()
+	mux = appauth.MountRoutes(mux, handler, db)
+	srv := httptest.NewServer(logging.NewMiddleware(logger)(mux))
+	defer srv.Close()
+
+	// Attempt login 窶・the outside read sees ACTIVE, but the tx UPDATE
+	// with status='ACTIVE' will see rows-affected=0 because the account
+	// was disabled inside BeginTx.
+	req, _ := http.NewRequest("POST", srv.URL+"/auth/login",
+		bytes.NewReader([]byte(`{"username":"victim","password":"Pass1234"}`)))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Must NOT get 200 窶・the login must fail.
+	if resp.StatusCode == http.StatusOK {
+		t.Fatalf("login must not succeed when account is disabled during tx, got 200")
+	}
+
+	// Must not return a token in the body.
+	data, _ := io.ReadAll(resp.Body)
+	var body map[string]any
+	_ = json.Unmarshal(data, &body)
+	if body != nil {
+		if d, ok := body["data"].(map[string]any); ok {
+			if _, hasToken := d["accessToken"]; hasToken {
+				t.Fatalf("must not issue access token when account disabled during tx")
+			}
+		}
+	}
+
+	// No refresh session should exist.
+	var sessionCount int
+	_ = db.QueryRow(`SELECT COUNT(*) FROM refresh_session WHERE user_id = ?`, victimID).Scan(&sessionCount)
+	if sessionCount != 0 {
+		t.Fatalf("expected 0 refresh sessions after race, got %d", sessionCount)
+	}
+
+	// No LOGIN audit should exist.
+	var auditCount int
+	_ = db.QueryRow(`SELECT COUNT(*) FROM operation_log WHERE action = 'LOGIN'`).Scan(&auditCount)
+	if auditCount != 0 {
+		t.Fatalf("expected 0 LOGIN audit rows after race, got %d", auditCount)
+	}
+
+	// The account must be DISABLED.
+	var status string
+	_ = db.QueryRow(`SELECT status FROM user_account WHERE id = ?`, victimID).Scan(&status)
+	if status != "DISABLED" {
+		t.Fatalf("expected DISABLED, got %s", status)
+	}
+}
+
+// ==================== r6: P1-2 Error code fault injection ====================
+
+// failingQueryRowDB wraps *sql.DB and makes QueryRowContext return a Row
+// from a closed DB (Scan will fail) for any query hitting user_account.
+// This simulates a DB error during the AuthMiddleware or Me query.
+type failingQueryRowDB struct {
+	db       *sql.DB
+	closedDB *sql.DB
+}
+
+func (f *failingQueryRowDB) BeginTx(ctx context.Context, opts *sql.TxOptions) (appauth.Tx, error) {
+	tx, err := f.db.BeginTx(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	return tx, nil
+}
+func (f *failingQueryRowDB) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	return f.db.ExecContext(ctx, query, args...)
+}
+func (f *failingQueryRowDB) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
+	if strings.Contains(query, "user_account") {
+		return f.closedDB.QueryRowContext(ctx, "SELECT 1")
+	}
+	return f.db.QueryRowContext(ctx, query, args...)
+}
+func (f *failingQueryRowDB) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	return f.db.QueryContext(ctx, query, args...)
+}
+
+// TestAuthMiddlewareDBErrorReturns50002 verifies that when the AuthMiddleware
+// DB query fails (not sql.ErrNoRows), the response is 500 + 50002, not 40101.
+func TestAuthMiddlewareDBErrorReturns50002(t *testing.T) {
+	tmpDir := t.TempDir()
+	dsn := "file:" + filepath.Join(tmpDir, "test.db")
+	db, err := database.Open(dsn)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	migrationsDir := filepath.Join("..", "..", "..", "migrations")
+	if err := database.MigrateUp(db, migrationsDir); err != nil {
+		t.Fatalf("migrate up: %v", err)
+	}
+
+	createTestUser(t, db, "owner1", "Pass1234", "OWNER", "ACTIVE")
+
+	// First login with real DB to get a valid token.
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	handler0 := appauth.NewHandler(db, "test-jwt-secret-for-r6-mw", logger)
+	mux0 := httpserver.New()
+	mux0 = appauth.MountRoutes(mux0, handler0, db)
+	srv0 := httptest.NewServer(logging.NewMiddleware(logger)(mux0))
+	token := loginAndGetTokenWith(t, srv0, "owner1", "Pass1234")
+	srv0.Close()
+
+	// Now set up a server where AuthMiddleware uses a DB wrapper that fails
+	// the user_account query. We can't wrap AuthMiddleware's DB directly
+	// (it takes *sql.DB), so we close the real DB to cause a query error.
+	// Actually, we need a different approach: use a separate closed DB for
+	// AuthMiddleware. But MountRoutes takes *sql.DB for AuthMiddleware.
+	//
+	// Strategy: close the db, then make a request. The AuthMiddleware will
+	// try to query the closed DB and get a non-ErrNoRows error.
+	closedDB, _ := sql.Open("sqlite", "file:"+filepath.Join(tmpDir, "closed.db"))
+	closedDB.Close()
+
+	handler := appauth.NewHandler(db, "test-jwt-secret-for-r6-mw", logger)
+	mux := httpserver.New()
+	// Pass the closed DB to AuthMiddleware 窶・any query will fail.
+	mux = appauth.MountRoutes(mux, handler, closedDB)
+	srv := httptest.NewServer(logging.NewMiddleware(logger)(mux))
+	defer srv.Close()
+
+	// GET /auth/me with valid token 窶・AuthMiddleware query fails.
+	req, _ := http.NewRequest("GET", srv.URL+"/auth/me", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("me: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("expected 500 for AuthMiddleware DB error, got %d", resp.StatusCode)
+	}
+	data, _ := io.ReadAll(resp.Body)
+	var body map[string]any
+	_ = json.Unmarshal(data, &body)
+	if body["code"] == float64(40101) {
+		t.Fatalf("must not return 40101 for DB error, got 40101")
+	}
+	if body["code"] != float64(50002) {
+		t.Fatalf("expected code 50002, got %v", body["code"])
+	}
+}
+
+// TestMeDBErrorReturns50002 verifies that when the Me handler's DB query
+// fails (not sql.ErrNoRows), the response is 500 + 50002, not 40401.
+func TestMeDBErrorReturns50002(t *testing.T) {
+	tmpDir := t.TempDir()
+	dsn := "file:" + filepath.Join(tmpDir, "test.db")
+	db, err := database.Open(dsn)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	migrationsDir := filepath.Join("..", "..", "..", "migrations")
+	if err := database.MigrateUp(db, migrationsDir); err != nil {
+		t.Fatalf("migrate up: %v", err)
+	}
+
+	createTestUser(t, db, "owner1", "Pass1234", "OWNER", "ACTIVE")
+
+	// First login with real DB to get a valid token.
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	handler0 := appauth.NewHandler(db, "test-jwt-secret-for-r6-me", logger)
+	mux0 := httpserver.New()
+	mux0 = appauth.MountRoutes(mux0, handler0, db)
+	srv0 := httptest.NewServer(logging.NewMiddleware(logger)(mux0))
+	token := loginAndGetTokenWith(t, srv0, "owner1", "Pass1234")
+	srv0.Close()
+
+	// Now use failingQueryRowDB so the Me query fails.
+	closedDB, _ := sql.Open("sqlite", "file:"+filepath.Join(tmpDir, "closed2.db"))
+	closedDB.Close()
+	failingDB := &failingQueryRowDB{db: db, closedDB: closedDB}
+
+	handler := appauth.NewHandler(failingDB, "test-jwt-secret-for-r6-me", logger)
+	mux := httpserver.New()
+	mux = appauth.MountRoutes(mux, handler, db)
+	srv := httptest.NewServer(logging.NewMiddleware(logger)(mux))
+	defer srv.Close()
+
+	// GET /auth/me with valid token 窶・Me query fails (not ErrNoRows).
+	req, _ := http.NewRequest("GET", srv.URL+"/auth/me", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("me: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("expected 500 for Me DB error, got %d", resp.StatusCode)
+	}
+	data, _ := io.ReadAll(resp.Body)
+	var body map[string]any
+	_ = json.Unmarshal(data, &body)
+	if body["code"] == float64(40401) {
+		t.Fatalf("must not return 40401 for DB error, got 40401")
+	}
+	if body["code"] != float64(50002) {
+		t.Fatalf("expected code 50002, got %v", body["code"])
+	}
+}
+
+// TestCreateUserNonUniqueDBErrorReturns50002 verifies that when CreateUser's
+// INSERT fails for a non-unique-constraint reason, the response is 500 + 50002,
+// not 40901.
+func TestCreateUserNonUniqueDBErrorReturns50002(t *testing.T) {
+	tmpDir := t.TempDir()
+	dsn := "file:" + filepath.Join(tmpDir, "test.db")
+	db, err := database.Open(dsn)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	migrationsDir := filepath.Join("..", "..", "..", "migrations")
+	if err := database.MigrateUp(db, migrationsDir); err != nil {
+		t.Fatalf("migrate up: %v", err)
+	}
+
+	createTestUser(t, db, "owner1", "Pass1234", "OWNER", "ACTIVE")
+
+	// First login with real DB to get a valid token.
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	handler0 := appauth.NewHandler(db, "test-jwt-secret-for-r6-create", logger)
+	mux0 := httpserver.New()
+	mux0 = appauth.MountRoutes(mux0, handler0, db)
+	srv0 := httptest.NewServer(logging.NewMiddleware(logger)(mux0))
+	token := loginAndGetTokenWith(t, srv0, "owner1", "Pass1234")
+	srv0.Close()
+
+	// Use failingInsertDB so the INSERT into user_account fails with a
+	// non-unique-constraint error (our wrapper returns a generic error).
+	closedDB, _ := sql.Open("sqlite", "file:"+filepath.Join(tmpDir, "closed3.db"))
+	closedDB.Close()
+	failingDB := &failingInsertDB{db: db, closedDB: closedDB}
+
+	handler := appauth.NewHandler(failingDB, "test-jwt-secret-for-r6-create", logger)
+	mux := httpserver.New()
+	mux = appauth.MountRoutes(mux, handler, db)
+	srv := httptest.NewServer(logging.NewMiddleware(logger)(mux))
+	defer srv.Close()
+
+	// POST /users — the INSERT will fail with a non-unique error.
+	code, body, _ := doRequestWithToken(t, "POST", srv.URL+"/users", token,
+		map[string]string{"username": "op1", "password": "Pass1234", "role": "OPERATOR"})
+
+	if code == http.StatusConflict {
+		t.Fatalf("must not return 40901 for non-unique DB error, got 409 body=%v", body)
+	}
+	if code != http.StatusInternalServerError {
+		t.Fatalf("expected 500 for non-unique DB error, got %d body=%v", code, body)
+	}
+	if body == nil || body["code"] != float64(50002) {
+		t.Fatalf("expected code 50002, got body=%v", body)
+	}
+}
+
+// ==================== r7: P1-1 failingAuditTx — only fails INSERT INTO operation_log ====================
+
+// failingAuditTx wraps *sql.Tx and only fails INSERT INTO operation_log.
+// All other queries (UPDATE user_account, INSERT INTO refresh_session) pass
+// through. This proves the test reaches the audit INSERT step, not just the
+// session INSERT.
+type failingAuditTx struct {
+	tx *sql.Tx
+}
+
+func (f *failingAuditTx) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	if strings.Contains(query, "operation_log") {
+		return nil, fmt.Errorf("simulated audit INSERT failure")
+	}
+	return f.tx.ExecContext(ctx, query, args...)
+}
+func (f *failingAuditTx) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
+	return f.tx.QueryRowContext(ctx, query, args...)
+}
+func (f *failingAuditTx) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	return f.tx.QueryContext(ctx, query, args...)
+}
+func (f *failingAuditTx) Commit() error {
+	return f.tx.Commit()
+}
+func (f *failingAuditTx) Rollback() error {
+	return f.tx.Rollback()
+}
+
+// failingAuditDB wraps *sql.DB and returns failingAuditTx from BeginTx.
+type failingAuditDB struct {
+	db *sql.DB
+}
+
+func (f *failingAuditDB) BeginTx(ctx context.Context, opts *sql.TxOptions) (appauth.Tx, error) {
+	tx, err := f.db.BeginTx(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	return &failingAuditTx{tx: tx}, nil
+}
+func (f *failingAuditDB) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	return f.db.ExecContext(ctx, query, args...)
+}
+func (f *failingAuditDB) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
+	return f.db.QueryRowContext(ctx, query, args...)
+}
+func (f *failingAuditDB) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	return f.db.QueryContext(ctx, query, args...)
+}
+
+// ==================== r7: P1-2 barrierRefreshTx — channel barrier for deterministic interleaving ====================
+
+// barrierRefreshTx wraps *sql.Tx. On the first ExecContext containing
+// "UPDATE refresh_session" AND "WHERE id = ?" (refresh's revoke pattern),
+// it signals reached and blocks on release. This pauses refresh after the
+// ACTIVE check (QueryRowContext) and before the revoke UPDATE.
+//
+// Disable's revoke-all query contains "WHERE user_id = ?" and does NOT
+// trigger the barrier, so disable runs to completion.
+type barrierRefreshTx struct {
+	tx       *sql.Tx
+	reached  chan struct{}
+	release  chan struct{}
+	signaled bool
+}
+
+func (f *barrierRefreshTx) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	if !f.signaled && strings.Contains(query, "UPDATE refresh_session") && strings.Contains(query, "WHERE id = ?") {
+		close(f.reached)
+		select {
+		case <-f.release:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		f.signaled = true
+	}
+	return f.tx.ExecContext(ctx, query, args...)
+}
+func (f *barrierRefreshTx) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
+	return f.tx.QueryRowContext(ctx, query, args...)
+}
+func (f *barrierRefreshTx) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	return f.tx.QueryContext(ctx, query, args...)
+}
+func (f *barrierRefreshTx) Commit() error {
+	return f.tx.Commit()
+}
+func (f *barrierRefreshTx) Rollback() error {
+	return f.tx.Rollback()
+}
+
+// barrierRefreshDB wraps *sql.DB and returns barrierRefreshTx from BeginTx.
+type barrierRefreshDB struct {
+	db      *sql.DB
+	reached chan struct{}
+	release chan struct{}
+}
+
+func (f *barrierRefreshDB) BeginTx(ctx context.Context, opts *sql.TxOptions) (appauth.Tx, error) {
+	tx, err := f.db.BeginTx(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	return &barrierRefreshTx{tx: tx, reached: f.reached, release: f.release}, nil
+}
+func (f *barrierRefreshDB) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	return f.db.ExecContext(ctx, query, args...)
+}
+func (f *barrierRefreshDB) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
+	return f.db.QueryRowContext(ctx, query, args...)
+}
+func (f *barrierRefreshDB) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	return f.db.QueryContext(ctx, query, args...)
+}
+
+// ==================== r7: P1-3.1 failingRowsAffected — RowsAffected() returns error ====================
+
+// failingRowsAffectedResult wraps sql.Result and makes RowsAffected() fail.
+type failingRowsAffectedResult struct {
+	result sql.Result
+}
+
+func (r *failingRowsAffectedResult) LastInsertId() (int64, error) {
+	return r.result.LastInsertId()
+}
+func (r *failingRowsAffectedResult) RowsAffected() (int64, error) {
+	return 0, fmt.Errorf("simulated RowsAffected failure")
+}
+
+// failingRowsAffectedTx wraps *sql.Tx and returns failingRowsAffectedResult
+// for the first ExecContext matching targetQuery.
+type failingRowsAffectedTx struct {
+	tx          *sql.Tx
+	targetQuery string
+	triggered   bool
+}
+
+func (f *failingRowsAffectedTx) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	res, err := f.tx.ExecContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	if !f.triggered && strings.Contains(query, f.targetQuery) {
+		f.triggered = true
+		return &failingRowsAffectedResult{result: res}, nil
+	}
+	return res, nil
+}
+func (f *failingRowsAffectedTx) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
+	return f.tx.QueryRowContext(ctx, query, args...)
+}
+func (f *failingRowsAffectedTx) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	return f.tx.QueryContext(ctx, query, args...)
+}
+func (f *failingRowsAffectedTx) Commit() error {
+	return f.tx.Commit()
+}
+func (f *failingRowsAffectedTx) Rollback() error {
+	return f.tx.Rollback()
+}
+
+// failingRowsAffectedDB wraps *sql.DB and returns failingRowsAffectedTx
+// from BeginTx with the given target query.
+type failingRowsAffectedDB struct {
+	db          *sql.DB
+	targetQuery string
+}
+
+func (f *failingRowsAffectedDB) BeginTx(ctx context.Context, opts *sql.TxOptions) (appauth.Tx, error) {
+	tx, err := f.db.BeginTx(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	return &failingRowsAffectedTx{tx: tx, targetQuery: f.targetQuery}, nil
+}
+func (f *failingRowsAffectedDB) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	return f.db.ExecContext(ctx, query, args...)
+}
+func (f *failingRowsAffectedDB) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
+	return f.db.QueryRowContext(ctx, query, args...)
+}
+func (f *failingRowsAffectedDB) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	return f.db.QueryContext(ctx, query, args...)
+}
+
+// TestLoginRowsAffectedErrorReturns50002 verifies that when RowsAffected()
+// fails on the login tx's UPDATE user_account, the response is 500 + 50002.
+func TestLoginRowsAffectedErrorReturns50002(t *testing.T) {
+	tmpDir := t.TempDir()
+	dsn := "file:" + filepath.Join(tmpDir, "test.db")
+	db, err := database.Open(dsn)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	migrationsDir := filepath.Join("..", "..", "..", "migrations")
+	if err := database.MigrateUp(db, migrationsDir); err != nil {
+		t.Fatalf("migrate up: %v", err)
+	}
+
+	createTestUser(t, db, "owner1", "Pass1234", "OWNER", "ACTIVE")
+
+	// failingRowsAffectedDB targets "UPDATE user_account" (login's fail count reset).
+	failingDB := &failingRowsAffectedDB{db: db, targetQuery: "UPDATE user_account"}
+
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	handler := appauth.NewHandler(failingDB, "test-jwt-secret-for-r7-rowsaffected", logger)
+	mux := httpserver.New()
+	mux = appauth.MountRoutes(mux, handler, db)
+	srv := httptest.NewServer(logging.NewMiddleware(logger)(mux))
+	defer srv.Close()
+
+	req, _ := http.NewRequest("POST", srv.URL+"/auth/login",
+		bytes.NewReader([]byte(`{"username":"owner1","password":"Pass1234"}`)))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", resp.StatusCode)
+	}
+	data, _ := io.ReadAll(resp.Body)
+	var body map[string]any
+	_ = json.Unmarshal(data, &body)
+	if body["code"] != float64(50002) {
+		t.Fatalf("expected code 50002, got %v", body["code"])
+	}
+}
+
+// TestRefreshRowsAffectedErrorReturns50002 verifies that when RowsAffected()
+// fails on the refresh tx's UPDATE refresh_session (revoke), the response is
+// 500 + 50002.
+func TestRefreshRowsAffectedErrorReturns50002(t *testing.T) {
+	tmpDir := t.TempDir()
+	dsn := "file:" + filepath.Join(tmpDir, "test.db")
+	db, err := database.Open(dsn)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	migrationsDir := filepath.Join("..", "..", "..", "migrations")
+	if err := database.MigrateUp(db, migrationsDir); err != nil {
+		t.Fatalf("migrate up: %v", err)
+	}
+
+	createTestUser(t, db, "op1", "Pass1234", "OPERATOR", "ACTIVE")
+
+	// Login with real DB to get a refresh cookie.
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	handler0 := appauth.NewHandler(db, "test-jwt-secret-for-r7-rowsaffected", logger)
+	mux0 := httpserver.New()
+	mux0 = appauth.MountRoutes(mux0, handler0, db)
+	srv0 := httptest.NewServer(logging.NewMiddleware(logger)(mux0))
+	_, _, opLoginResp := doRequest(t, "POST", srv0.URL+"/auth/login",
+		map[string]string{"username": "op1", "password": "Pass1234"}, nil)
+	opCookie := extractRefreshCookie(opLoginResp)
+	if opCookie == nil {
+		t.Fatalf("no refresh cookie")
+	}
+	srv0.Close()
+
+	// failingRowsAffectedDB targets "UPDATE refresh_session" (refresh's revoke).
+	failingDB := &failingRowsAffectedDB{db: db, targetQuery: "UPDATE refresh_session"}
+
+	handler := appauth.NewHandler(failingDB, "test-jwt-secret-for-r7-rowsaffected", logger)
+	mux := httpserver.New()
+	mux = appauth.MountRoutes(mux, handler, db)
+	srv := httptest.NewServer(logging.NewMiddleware(logger)(mux))
+	defer srv.Close()
+
+	code, body, _ := doRequestWithCookie(t, "POST", srv.URL+"/auth/refresh", opCookie)
+	if code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d body=%v", code, body)
+	}
+	if body == nil || body["code"] != float64(50002) {
+		t.Fatalf("expected code 50002, got body=%v", body)
+	}
+}
+
+// TestDisableRowsAffectedErrorReturns50002 verifies that when RowsAffected()
+// fails on the disable tx's UPDATE user_account (set DISABLED), the response
+// is 500 + 50002.
+func TestDisableRowsAffectedErrorReturns50002(t *testing.T) {
+	tmpDir := t.TempDir()
+	dsn := "file:" + filepath.Join(tmpDir, "test.db")
+	db, err := database.Open(dsn)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	migrationsDir := filepath.Join("..", "..", "..", "migrations")
+	if err := database.MigrateUp(db, migrationsDir); err != nil {
+		t.Fatalf("migrate up: %v", err)
+	}
+
+	createTestUser(t, db, "owner1", "Pass1234", "OWNER", "ACTIVE")
+	createTestUser(t, db, "op1", "Pass1234", "OPERATOR", "ACTIVE")
+
+	// Login with real DB to get owner token.
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	handler0 := appauth.NewHandler(db, "test-jwt-secret-for-r7-rowsaffected", logger)
+	mux0 := httpserver.New()
+	mux0 = appauth.MountRoutes(mux0, handler0, db)
+	srv0 := httptest.NewServer(logging.NewMiddleware(logger)(mux0))
+	ownerToken := loginAndGetTokenWith(t, srv0, "owner1", "Pass1234")
+	srv0.Close()
+
+	// failingRowsAffectedDB targets "UPDATE user_account" (disable's set status).
+	// But login also uses "UPDATE user_account" — we need to be more specific.
+	// Disable's query is "UPDATE user_account SET status = 'DISABLED'".
+	// Login's query is "UPDATE user_account SET login_fail_count = 0".
+	// We target "SET status = 'DISABLED'" to only affect disable.
+	failingDB := &failingRowsAffectedDB{db: db, targetQuery: "SET status = 'DISABLED'"}
+
+	handler := appauth.NewHandler(failingDB, "test-jwt-secret-for-r7-rowsaffected", logger)
+	mux := httpserver.New()
+	mux = appauth.MountRoutes(mux, handler, db)
+	srv := httptest.NewServer(logging.NewMiddleware(logger)(mux))
+	defer srv.Close()
+
+	code, body, _ := doRequestWithToken(t, "POST", srv.URL+"/users/2/disable", ownerToken, nil)
+	if code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d body=%v", code, body)
+	}
+	if body == nil || body["code"] != float64(50002) {
+		t.Fatalf("expected code 50002, got body=%v", body)
+	}
+}
+
+// ==================== r7: P1-3.2 failingLastInsertId — LastInsertId() returns error ====================
+
+// failingLastInsertIdResult wraps sql.Result and makes LastInsertId() fail.
+type failingLastInsertIdResult struct {
+	result sql.Result
+}
+
+func (r *failingLastInsertIdResult) LastInsertId() (int64, error) {
+	return 0, fmt.Errorf("simulated LastInsertId failure")
+}
+func (r *failingLastInsertIdResult) RowsAffected() (int64, error) {
+	return r.result.RowsAffected()
+}
+
+// failingLastInsertIdTx wraps *sql.Tx and returns failingLastInsertIdResult
+// for INSERT INTO user_account.
+type failingLastInsertIdTx struct {
+	tx        *sql.Tx
+	triggered bool
+}
+
+func (f *failingLastInsertIdTx) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	res, err := f.tx.ExecContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	if !f.triggered && strings.Contains(query, "INSERT INTO user_account") {
+		f.triggered = true
+		return &failingLastInsertIdResult{result: res}, nil
+	}
+	return res, nil
+}
+func (f *failingLastInsertIdTx) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
+	return f.tx.QueryRowContext(ctx, query, args...)
+}
+func (f *failingLastInsertIdTx) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	return f.tx.QueryContext(ctx, query, args...)
+}
+func (f *failingLastInsertIdTx) Commit() error {
+	return f.tx.Commit()
+}
+func (f *failingLastInsertIdTx) Rollback() error {
+	return f.tx.Rollback()
+}
+
+// failingLastInsertIdDB wraps *sql.DB and returns failingLastInsertIdTx.
+type failingLastInsertIdDB struct {
+	db *sql.DB
+}
+
+func (f *failingLastInsertIdDB) BeginTx(ctx context.Context, opts *sql.TxOptions) (appauth.Tx, error) {
+	tx, err := f.db.BeginTx(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	return &failingLastInsertIdTx{tx: tx}, nil
+}
+func (f *failingLastInsertIdDB) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	return f.db.ExecContext(ctx, query, args...)
+}
+func (f *failingLastInsertIdDB) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
+	return f.db.QueryRowContext(ctx, query, args...)
+}
+func (f *failingLastInsertIdDB) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	return f.db.QueryContext(ctx, query, args...)
+}
+
+// TestCreateUserLastInsertIdErrorReturns50002 verifies that when
+// LastInsertId() fails on the CreateUser tx's INSERT INTO user_account,
+// the response is 500 + 50002 and the tx rolls back (no user created).
+func TestCreateUserLastInsertIdErrorReturns50002(t *testing.T) {
+	tmpDir := t.TempDir()
+	dsn := "file:" + filepath.Join(tmpDir, "test.db")
+	db, err := database.Open(dsn)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	migrationsDir := filepath.Join("..", "..", "..", "migrations")
+	if err := database.MigrateUp(db, migrationsDir); err != nil {
+		t.Fatalf("migrate up: %v", err)
+	}
+
+	createTestUser(t, db, "owner1", "Pass1234", "OWNER", "ACTIVE")
+
+	// Login with real DB to get owner token.
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	handler0 := appauth.NewHandler(db, "test-jwt-secret-for-r7-lastinsertid", logger)
+	mux0 := httpserver.New()
+	mux0 = appauth.MountRoutes(mux0, handler0, db)
+	srv0 := httptest.NewServer(logging.NewMiddleware(logger)(mux0))
+	token := loginAndGetTokenWith(t, srv0, "owner1", "Pass1234")
+	srv0.Close()
+
+	failingDB := &failingLastInsertIdDB{db: db}
+
+	handler := appauth.NewHandler(failingDB, "test-jwt-secret-for-r7-lastinsertid", logger)
+	mux := httpserver.New()
+	mux = appauth.MountRoutes(mux, handler, db)
+	srv := httptest.NewServer(logging.NewMiddleware(logger)(mux))
+	defer srv.Close()
+
+	code, body, _ := doRequestWithToken(t, "POST", srv.URL+"/users", token,
+		map[string]string{"username": "op1", "password": "Pass1234", "role": "OPERATOR"})
+
+	if code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d body=%v", code, body)
+	}
+	if body == nil || body["code"] != float64(50002) {
+		t.Fatalf("expected code 50002, got body=%v", body)
+	}
+
+	// Verify no user was created (tx rolled back).
+	var count int
+	err = db.QueryRow(`SELECT COUNT(*) FROM user_account WHERE username = 'op1'`).Scan(&count)
+	if err != nil {
+		t.Fatalf("query count: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected 0 users with username op1 (rollback), got %d", count)
+	}
+}
+
+// ==================== r7: P1-3.3 failingScanDB — ListUsers Scan/rows.Err error ====================
+
+// failingScanDB wraps *sql.DB. For the ListUsers query (SELECT ... FROM
+// user_account WHERE deleted_at), it returns rows with incompatible column
+// types ('text' for id), causing a Scan error when scanning into int64.
+type failingScanDB struct {
+	db *sql.DB
+}
+
+func (f *failingScanDB) BeginTx(ctx context.Context, opts *sql.TxOptions) (appauth.Tx, error) {
+	tx, err := f.db.BeginTx(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	return tx, nil
+}
+func (f *failingScanDB) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	return f.db.ExecContext(ctx, query, args...)
+}
+func (f *failingScanDB) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
+	return f.db.QueryRowContext(ctx, query, args...)
+}
+func (f *failingScanDB) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	if strings.Contains(query, "FROM user_account") && strings.Contains(query, "deleted_at IS NULL") {
+		// Return rows with incompatible types: 'text' for id (expected int64).
+		return f.db.QueryContext(ctx, `SELECT 'text' AS id, 'x' AS username, 'x' AS role, 'x' AS display_name, 'x' AS status, 'x' AS created_at LIMIT 1`)
+	}
+	return f.db.QueryContext(ctx, query, args...)
+}
+
+// TestListUsersScanErrorReturns50002 verifies that when the ListUsers query
+// produces a Scan error (incompatible column types), the response is
+// 500 + 50002, not 200 with partial/empty results.
+func TestListUsersScanErrorReturns50002(t *testing.T) {
+	tmpDir := t.TempDir()
+	dsn := "file:" + filepath.Join(tmpDir, "test.db")
+	db, err := database.Open(dsn)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	migrationsDir := filepath.Join("..", "..", "..", "migrations")
+	if err := database.MigrateUp(db, migrationsDir); err != nil {
+		t.Fatalf("migrate up: %v", err)
+	}
+
+	createTestUser(t, db, "owner1", "Pass1234", "OWNER", "ACTIVE")
+
+	// Login with real DB to get owner token.
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	handler0 := appauth.NewHandler(db, "test-jwt-secret-for-r7-scan", logger)
+	mux0 := httpserver.New()
+	mux0 = appauth.MountRoutes(mux0, handler0, db)
+	srv0 := httptest.NewServer(logging.NewMiddleware(logger)(mux0))
+	token := loginAndGetTokenWith(t, srv0, "owner1", "Pass1234")
+	srv0.Close()
+
+	failingDB := &failingScanDB{db: db}
+
+	handler := appauth.NewHandler(failingDB, "test-jwt-secret-for-r7-scan", logger)
+	mux := httpserver.New()
+	mux = appauth.MountRoutes(mux, handler, db)
+	srv := httptest.NewServer(logging.NewMiddleware(logger)(mux))
+	defer srv.Close()
+
+	code, body, _ := doRequestWithToken(t, "GET", srv.URL+"/users", token, nil)
+	if code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d body=%v", code, body)
+	}
+	if body == nil || body["code"] != float64(50002) {
+		t.Fatalf("expected code 50002, got body=%v", body)
+	}
+}
+
+// ==================== r7: P1-3.4 Real duplicate username → 40901 ====================
+
+// TestCreateUserDuplicateUsernameReturns40901 verifies that creating a user
+// with an already-existing username returns 409 + 40901 (not 50002).
+func TestCreateUserDuplicateUsernameReturns40901(t *testing.T) {
+	ts := newTestServer(t)
+	createTestUser(t, ts.db, "owner1", "Pass1234", "OWNER", "ACTIVE")
+	createTestUser(t, ts.db, "existingop", "Pass1234", "OPERATOR", "ACTIVE")
+	token := loginAndGetToken(t, ts, "owner1", "Pass1234")
+
+	code, body, _ := doRequestWithToken(t, "POST", ts.srv.URL+"/users", token,
+		map[string]string{"username": "existingop", "password": "Pass1234", "role": "OPERATOR"})
+
+	if code != http.StatusConflict {
+		t.Fatalf("expected 409 for duplicate username, got %d body=%v", code, body)
+	}
+	if body == nil || body["code"] != float64(40901) {
+		t.Fatalf("expected code 40901, got body=%v", body)
+	}
 }

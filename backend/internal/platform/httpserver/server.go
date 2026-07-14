@@ -68,8 +68,13 @@ func AuthMiddleware(jwtSecret string, db *sql.DB) func(http.Handler) http.Handle
 				claims.UserID,
 			).Scan(&role)
 			if err != nil {
-				// sql.ErrNoRows or any DB error → treat as unauthenticated.
-				WriteErrorFromContext(w, r, http.StatusUnauthorized, CodeUnauth, "AUTH_REQUIRED")
+				if err == sql.ErrNoRows {
+					// Account no longer ACTIVE or deleted → unauthenticated.
+					WriteErrorFromContext(w, r, http.StatusUnauthorized, CodeUnauth, "AUTH_REQUIRED")
+					return
+				}
+				// Database error (not "not found") → 500 + 50002.
+				WriteErrorFromContext(w, r, http.StatusInternalServerError, CodeDatabase, "DATABASE_ERROR")
 				return
 			}
 
