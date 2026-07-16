@@ -9,6 +9,8 @@ import (
 	"syscall"
 	"time"
 
+	appauth "github.com/prelove/zedu/backend/internal/app/auth"
+	"github.com/prelove/zedu/backend/internal/platform/auth"
 	"github.com/prelove/zedu/backend/internal/platform/database"
 	"github.com/prelove/zedu/backend/internal/platform/httpserver"
 	"github.com/prelove/zedu/backend/internal/platform/logging"
@@ -41,6 +43,13 @@ func main() {
 	}
 
 	mux := httpserver.New()
+	jwtSecret := os.Getenv("ZEDU_JWT_SECRET")
+	if err := auth.ValidateSecret(jwtSecret); err != nil {
+		slog.Error("invalid JWT secret", slog.Any("error", err))
+		os.Exit(1)
+	}
+	authHandler := appauth.NewHandler(db, jwtSecret, logger)
+	mux = appauth.MountRoutes(mux, authHandler, db)
 	handler := logging.NewMiddleware(logger)(mux)
 
 	port := os.Getenv("PORT")

@@ -14,11 +14,12 @@
 4. `POST /users` 仅检查 password 非空，未满足 PRD 的至少 8 位且包含字母和数字。实现校验并为非法输入使用冻结的参数/状态错误语义；补测试。`/users` 只能创建 Operator，不得通过请求创建 Owner。
 5. `teacher_capability.track_id` 和 `level_id` 可为 NULL，SQLite 的 UNIQUE 对 NULL 不冲突，无法保证三元唯一。两列必须 NOT NULL，或在明确的独立能力模型下使用等价的 NULL-safe 约束；按当前冻结契约采用 NOT NULL，补 NULL 与并发重复测试。
 6. `student_teacher_assignment` 缺少 `enrollment_id WHERE status='ACTIVE'` 的部分唯一约束。新增数据库层限制并补迁移与并发测试，确保每个 enrollment 最多一个 ACTIVE assignment。
+7. 登录失败计数不得采用“先 SELECT `login_fail_count` 再 SET 新值”的读改写。并发错误密码可以同时读到同一计数并绕过第五次锁定。使用原子 SQL 更新或单事务条件更新，保证第 5 个失败请求设置 15 分钟锁定；补 5/6 个并发失败请求的锁定回归测试。
 
 ## P2（本次一并修复）
 
 1. 输入错误不得以 `40102`、`40301` 或 `40401` 搭配 HTTP 400 表示；统一使用冻结的参数/状态语义并让 HTTP status 与业务码一致。
-2. 认证成功/失败日志必须带 request ID；未知用户名不得记录完整敏感标识。补日志断言。
+2. 所有认证成功/失败日志必须带 request ID；未知用户名不得记录完整敏感标识。特别是 `Refresh` 的 query、begin transaction、revoke、insert、commit 错误日志均须附 `slog.String("request_id", rid)`；补刷新失败日志断言。
 3. JWT 验证必须严格只接受 `HS256`，不能接受任意 HMAC 算法；未知用户名路径执行 dummy bcrypt compare，降低可观测时序枚举。
 
 ## 必须重新执行
