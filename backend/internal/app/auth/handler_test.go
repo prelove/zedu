@@ -286,7 +286,7 @@ func TestRefreshTokenRotation(t *testing.T) {
 		t.Fatalf("no refresh cookie after login")
 	}
 
-	// Refresh 窶・should return new access token and new refresh cookie.
+	// Refresh should return a new access token and a new refresh cookie.
 	code, body, resp2 := doRequest(t, "POST", ts.srv.URL+"/auth/refresh", nil, cookie)
 	if code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%v", code, body)
@@ -304,7 +304,7 @@ func TestRefreshTokenRotation(t *testing.T) {
 		t.Fatalf("expected new refresh cookie after rotation")
 	}
 	if newCookie.Value == cookie.Value {
-		t.Fatalf("refresh token must rotate 窶・new cookie same as old")
+		t.Fatalf("refresh token must rotate: new cookie same as old")
 	}
 }
 
@@ -327,7 +327,7 @@ func TestRefreshOldTokenReplayFails(t *testing.T) {
 		t.Fatalf("no new cookie after refresh")
 	}
 
-	// Replay old cookie 窶・must fail.
+	// Replay of the old cookie must fail.
 	code, body, _ := doRequest(t, "POST", ts.srv.URL+"/auth/refresh", nil, oldCookie)
 	if code != http.StatusUnauthorized {
 		t.Fatalf("expected 401 for replayed old refresh token, got %d", code)
@@ -418,7 +418,7 @@ func TestOperatorDeniedOwnerOnlyAPI(t *testing.T) {
 
 	opToken := loginAndGetToken(t, ts, "op1", "Pass1234")
 
-	// Operator tries to list users 窶・Owner-only.
+	// Operator tries to list users: Owner-only.
 	code, body, _ := doRequestWithToken(t, "GET", ts.srv.URL+"/users", opToken, nil)
 	if code != http.StatusForbidden {
 		t.Fatalf("expected 403, got %d", code)
@@ -682,6 +682,35 @@ func TestCreateUserOperatorSuccess(t *testing.T) {
 	}
 }
 
+func TestCreateOperatorAuditDetailEscapesUsername(t *testing.T) {
+	ts := newTestServer(t)
+	createTestUser(t, ts.db, "owner1", "Pass1234", "OWNER", "ACTIVE")
+	token := loginAndGetToken(t, ts, "owner1", "Pass1234")
+	username := "operator\"\\line\nnext"
+
+	code, body, _ := doRequestWithToken(t, "POST", ts.srv.URL+"/users", token,
+		map[string]string{"username": username, "password": "Pass1234", "role": "OPERATOR"})
+	if code != http.StatusCreated || body == nil || body["code"] != float64(0) {
+		t.Fatalf("expected successful operator creation, got code=%d body=%v", code, body)
+	}
+
+	logs := queryAuditLogs(t, ts.db, "CREATE_OPERATOR")
+	if len(logs) != 1 {
+		t.Fatalf("expected 1 CREATE_OPERATOR audit row, got %d", len(logs))
+	}
+
+	var detail map[string]string
+	if err := json.Unmarshal([]byte(logs[0].DetailJSON), &detail); err != nil {
+		t.Fatalf("audit detail_json must be valid JSON: %v; detail=%q", err, logs[0].DetailJSON)
+	}
+	if len(detail) != 2 || detail["action"] != "create_operator" || detail["username"] != username {
+		t.Fatalf("unexpected audit detail: %#v", detail)
+	}
+	if strings.Contains(logs[0].DetailJSON, "Pass1234") {
+		t.Fatalf("audit detail must not contain submitted password: %q", logs[0].DetailJSON)
+	}
+}
+
 // ==================== P2.2: Log includes request ID, unknown user no username ====================
 
 func TestLoginLogIncludesRequestIDAndNoUsernameForUnknownUser(t *testing.T) {
@@ -897,7 +926,7 @@ func TestLoginFailCountUpdateErrorDoesNotReturn40102(t *testing.T) {
 	code, body, _ := doRequest(t, "POST", srv.URL+"/auth/login",
 		map[string]string{"username": "victim", "password": "wrongpass1"}, nil)
 
-	// Must NOT be 40102 (LOGIN_FAILED) 窶・that would mask the DB error.
+	// Must NOT be 40102 (LOGIN_FAILED): that would mask the DB error.
 	if code == http.StatusUnauthorized && body != nil && body["code"] == float64(40102) {
 		t.Fatalf("must not return 40102 when fail-count UPDATE fails; got code=40102 body=%v", body)
 	}
@@ -962,7 +991,7 @@ func (f *failingUpdateDB) ExecContext(ctx context.Context, query string, args ..
 
 func (f *failingUpdateDB) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
 	if strings.Contains(strings.ToUpper(query), "UPDATE") {
-		// Return a Row from a closed DB 窶・Scan will fail with "sql: database is closed".
+		// Return a Row from a closed DB; Scan will fail with "sql: database is closed".
 		return f.closedDB.QueryRowContext(ctx, "SELECT 1")
 	}
 	return f.db.QueryRowContext(ctx, query, args...)
@@ -1012,7 +1041,7 @@ func TestRefreshErrorLogIncludesRequestID(t *testing.T) {
 	// This hits the `h.logger.Error("refresh query error", ...)` path.
 	db.Close()
 
-	// Call refresh with the real cookie 窶・the DB query will fail.
+	// Call refresh with the real cookie; the DB query will fail.
 	req, _ := http.NewRequest("POST", srv.URL+"/auth/refresh", nil)
 	req.AddCookie(cookie)
 	resp, err := http.DefaultClient.Do(req)
@@ -1077,7 +1106,7 @@ func TestAuthBypassRemovedFailingDBRejectsUnauthenticatedME(t *testing.T) {
 	srv := httptest.NewServer(wrapped)
 	defer srv.Close()
 
-	// No Authorization header 竊・must get 401 / 40101.
+	// No Authorization header must get 401 / 40101.
 	req, _ := http.NewRequest("GET", srv.URL+"/auth/me", nil)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -1128,7 +1157,7 @@ func TestAuthBypassRemovedFailingDBRejectsUnauthenticatedUsers(t *testing.T) {
 	srv := httptest.NewServer(wrapped)
 	defer srv.Close()
 
-	// No Authorization header 竊・must get 401 / 40101.
+	// No Authorization header must get 401 / 40101.
 	req, _ := http.NewRequest("GET", srv.URL+"/users", nil)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -1187,7 +1216,7 @@ func TestAuthBypassRemovedFailingDBAuthenticatedMESucceeds(t *testing.T) {
 		t.Fatalf("login failed: no token returned")
 	}
 
-	// GET /auth/me with valid Bearer token 竊・must get 200.
+	// GET /auth/me with valid Bearer token must get 200.
 	code, body, _ := doRequestWithToken(t, "GET", srv.URL+"/auth/me", token, nil)
 	if code != http.StatusOK {
 		t.Fatalf("expected 200 for authenticated GET /auth/me, got %d body=%v", code, body)
@@ -1565,7 +1594,7 @@ func TestDisableUserWritesAuditLog(t *testing.T) {
 
 // TestLoginAuditFailureRollsBackAll verifies that if the audit log INSERT
 // (INSERT INTO operation_log) fails inside the login transaction, the fail
-// count reset and refresh session insertion are also rolled back 窶・no partial
+// count reset and refresh session insertion are also rolled back; no partial
 // writes. The refresh_session INSERT must succeed first, proving the test
 // reaches the audit INSERT, not just the session INSERT.
 // Establishes fail_count=1 first, then asserts it remains 1 after rollback.
@@ -1614,7 +1643,7 @@ func TestLoginAuditFailureRollsBackAll(t *testing.T) {
 
 	// Step 2: Use failingAuditDB which only fails INSERT INTO operation_log.
 	// This lets UPDATE user_account and INSERT INTO refresh_session succeed
-	// inside the tx, then fails on the audit INSERT 窶・proving the test
+	// inside the tx, then fails on the audit INSERT, proving the test
 	// reaches the audit step, not just the session INSERT.
 	failingDB := &failingAuditDB{db: db}
 
@@ -1624,7 +1653,7 @@ func TestLoginAuditFailureRollsBackAll(t *testing.T) {
 	srv := httptest.NewServer(logging.NewMiddleware(logger)(mux))
 	defer srv.Close()
 
-	// Attempt successful login 窶・the audit INSERT should fail inside the tx.
+	// Attempt successful login; the audit INSERT should fail inside the tx.
 	req, _ := http.NewRequest("POST", srv.URL+"/auth/login",
 		bytes.NewReader([]byte(`{"username":"owner1","password":"Pass1234"}`)))
 	req.Header.Set("Content-Type", "application/json")
@@ -1716,7 +1745,7 @@ func TestLogoutRevokeFailureDoesNotReturnSuccess(t *testing.T) {
 	srv2 := httptest.NewServer(logging.NewMiddleware(logger)(mux2))
 	defer srv2.Close()
 
-	// Attempt logout 窶・the revoke should fail.
+	// Attempt logout; the revoke should fail.
 	code, body, _ := doRequestWithTokenAndCookie(t, "POST", srv2.URL+"/auth/logout", token, cookie)
 	if code == http.StatusOK {
 		t.Fatalf("must not return 200 when logout revoke fails, got %d body=%v", code, body)
@@ -1736,7 +1765,7 @@ func TestLogoutRevokeFailureDoesNotReturnSuccess(t *testing.T) {
 
 // TestDisableRevokeFailureRollsBack verifies that if the session revoke
 // fails inside the disable transaction, the account status is NOT set to
-// DISABLED 窶・everything rolls back.
+// DISABLED; everything rolls back.
 func TestDisableRevokeFailureRollsBack(t *testing.T) {
 	tmpDir := t.TempDir()
 	dsn := "file:" + filepath.Join(tmpDir, "test.db")
@@ -1776,7 +1805,7 @@ func TestDisableRevokeFailureRollsBack(t *testing.T) {
 	srv2 := httptest.NewServer(logging.NewMiddleware(logger)(mux2))
 	defer srv2.Close()
 
-	// Attempt disable 窶・the session revoke should fail.
+	// Attempt disable; the session revoke should fail.
 	code, body, _ := doRequestWithToken(t, "POST", srv2.URL+"/users/2/disable", ownerToken, nil)
 	if code == http.StatusOK {
 		t.Fatalf("must not return 200 when disable revoke fails, got %d body=%v", code, body)
@@ -1992,7 +2021,7 @@ func TestFailedLoginNoSuccessAudit(t *testing.T) {
 	ts := newTestServer(t)
 	createTestUser(t, ts.db, "owner1", "Pass1234", "OWNER", "ACTIVE")
 
-	// Wrong password 窶・should fail.
+	// Wrong password should fail.
 	_, _, _ = doRequest(t, "POST", ts.srv.URL+"/auth/login",
 		map[string]string{"username": "owner1", "password": "wrongpass1"}, nil)
 
@@ -2027,7 +2056,7 @@ func TestConflictRequestNoSuccessAudit(t *testing.T) {
 	createTestUser(t, ts.db, "op1", "Pass1234", "OPERATOR", "ACTIVE")
 	token := loginAndGetToken(t, ts, "owner1", "Pass1234")
 
-	// Try to create op1 again 窶・should conflict.
+	// Try to create op1 again; should conflict.
 	_, body, _ := doRequestWithToken(t, "POST", ts.srv.URL+"/users", token,
 		map[string]string{"username": "op1", "password": "Pass1234", "role": "OPERATOR"})
 	if body == nil || body["code"] != float64(40901) {
@@ -2108,11 +2137,11 @@ func doRequestWithTokenAndCookie(t *testing.T, method, url, token string, cookie
 func doRequestOnCustomServer(t *testing.T, db *sql.DB, failingDB interface{}, username, password string,
 	mountFn func(h *appauth.Handler, mux *http.ServeMux), method, path string) (int, map[string]any, *http.Response) {
 	t.Helper()
-	// This is a simplified helper 窶・not used in the main test flow.
+	// This is a simplified helper, not used in the main test flow.
 	return 0, nil, nil
 }
 
-// ==================== r6: P1-1 Login/disable race 窶・deterministic interleaving ====================
+// ==================== r6: P1-1 Login/disable race: deterministic interleaving ====================
 
 // failingInsertAfterUpdateTx wraps *sql.Tx and lets the first N ExecContext
 // calls pass through, then fails the (N+1)th. This creates a deterministic
@@ -2256,7 +2285,7 @@ func TestLoginDisableRaceNoActiveSession(t *testing.T) {
 	srv := httptest.NewServer(logging.NewMiddleware(logger)(mux))
 	defer srv.Close()
 
-	// Attempt login 窶・the outside read sees ACTIVE, but the tx UPDATE
+	// Attempt login: the outside read sees ACTIVE, but the tx UPDATE
 	// with status='ACTIVE' will see rows-affected=0 because the account
 	// was disabled inside BeginTx.
 	req, _ := http.NewRequest("POST", srv.URL+"/auth/login",
@@ -2268,7 +2297,7 @@ func TestLoginDisableRaceNoActiveSession(t *testing.T) {
 	}
 	defer resp.Body.Close()
 
-	// Must NOT get 200 窶・the login must fail.
+	// Must NOT get 200; the login must fail.
 	if resp.StatusCode == http.StatusOK {
 		t.Fatalf("login must not succeed when account is disabled during tx, got 200")
 	}
@@ -2377,12 +2406,12 @@ func TestAuthMiddlewareDBErrorReturns50002(t *testing.T) {
 
 	handler := appauth.NewHandler(db, "test-jwt-secret-for-r6-mw", logger)
 	mux := httpserver.New()
-	// Pass the closed DB to AuthMiddleware 窶・any query will fail.
+	// Pass the closed DB to AuthMiddleware; any query will fail.
 	mux = appauth.MountRoutes(mux, handler, closedDB)
 	srv := httptest.NewServer(logging.NewMiddleware(logger)(mux))
 	defer srv.Close()
 
-	// GET /auth/me with valid token 窶・AuthMiddleware query fails.
+	// GET /auth/me with valid token; AuthMiddleware query fails.
 	req, _ := http.NewRequest("GET", srv.URL+"/auth/me", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	resp, err := http.DefaultClient.Do(req)
@@ -2443,7 +2472,7 @@ func TestMeDBErrorReturns50002(t *testing.T) {
 	srv := httptest.NewServer(logging.NewMiddleware(logger)(mux))
 	defer srv.Close()
 
-	// GET /auth/me with valid token 窶・Me query fails (not ErrNoRows).
+	// GET /auth/me with valid token; Me query fails (not ErrNoRows).
 	req, _ := http.NewRequest("GET", srv.URL+"/auth/me", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	resp, err := http.DefaultClient.Do(req)

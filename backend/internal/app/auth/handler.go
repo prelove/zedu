@@ -770,9 +770,18 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request, actor https
 		return
 	}
 
-	// Audit log in the same transaction.
-	detail := `{"action":"create_operator","username":"` + req.Username + `"}`
-	if err := insertAuditLog(tx, r.Context(), actor.UserID, "", "CREATE_OPERATOR", "USER", id, detail, rid); err != nil {
+	// Audit log in the same transaction. Marshal user-controlled username so
+	// detail_json remains valid JSON and cannot gain forged fields.
+	detail, err := json.Marshal(map[string]string{
+		"action":   "create_operator",
+		"username": req.Username,
+	})
+	if err != nil {
+		_ = tx.Rollback()
+		h.writeInternalError(w, r, "create user audit detail", err)
+		return
+	}
+	if err := insertAuditLog(tx, r.Context(), actor.UserID, "", "CREATE_OPERATOR", "USER", id, string(detail), rid); err != nil {
 		_ = tx.Rollback()
 		h.writeDBError(w, r, "create user audit log", err)
 		return
