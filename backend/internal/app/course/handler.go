@@ -46,6 +46,22 @@ func MountRoutes(mux *http.ServeMux, h *Handler, authDB *sql.DB, jwtSecret strin
 	mux.Handle("GET /capability-tags", authMW(http.HandlerFunc(h.listTags)))
 	mux.Handle("POST /capability-tags", authMW(http.HandlerFunc(h.createTag)))
 	mux.Handle("PATCH /capability-tags/{id}", authMW(http.HandlerFunc(h.updateTag)))
+
+	MountEnrollmentRoutes(mux, h, authDB, jwtSecret)
+}
+
+// MountEnrollmentRoutes mounts the enrollment and assignment routes (stage C).
+func MountEnrollmentRoutes(mux *http.ServeMux, h *Handler, authDB *sql.DB, jwtSecret string) {
+	authMW := httpserver.AuthMiddleware(jwtSecret, authDB)
+
+	mux.Handle("GET /students/{id}/enrollments", authMW(http.HandlerFunc(h.listEnrollments)))
+	mux.Handle("POST /students/{id}/enrollments", authMW(http.HandlerFunc(h.createEnrollment)))
+	mux.Handle("GET /enrollments/{id}", authMW(http.HandlerFunc(h.getEnrollment)))
+	mux.Handle("PATCH /enrollments/{id}", authMW(http.HandlerFunc(h.updateEnrollment)))
+
+	mux.Handle("GET /enrollments/{id}/assignments", authMW(http.HandlerFunc(h.listAssignments)))
+	mux.Handle("POST /enrollments/{id}/assignments", authMW(http.HandlerFunc(h.createAssignment)))
+	mux.Handle("POST /assignments/{id}/end", authMW(http.HandlerFunc(h.endAssignment)))
 }
 
 // ---------- Domain ----------
@@ -225,6 +241,123 @@ func (h *Handler) updateTag(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpserver.WriteSuccess(w, http.StatusOK, updated)
+}
+
+// ---------- Enrollment ----------
+
+func (h *Handler) listEnrollments(w http.ResponseWriter, r *http.Request) {
+	user, _ := httpserver.UserFromContext(r.Context())
+	studentID, ok := pathID(r, "id")
+	if !ok {
+		httpserver.WriteErrorFromContext(w, r, http.StatusNotFound, httpserver.CodeNotFound, "NOT_FOUND")
+		return
+	}
+	items, err := h.svc.ListEnrollments(r.Context(), user, studentID)
+	h.respond(w, r, items, err)
+}
+
+func (h *Handler) createEnrollment(w http.ResponseWriter, r *http.Request) {
+	user, _ := httpserver.UserFromContext(r.Context())
+	studentID, ok := pathID(r, "id")
+	if !ok {
+		httpserver.WriteErrorFromContext(w, r, http.StatusNotFound, httpserver.CodeNotFound, "NOT_FOUND")
+		return
+	}
+	var w2 EnrollmentWrite
+	if err := json.NewDecoder(r.Body).Decode(&w2); err != nil {
+		httpserver.WriteErrorFromContext(w, r, http.StatusUnprocessableEntity, httpserver.CodeInvalidState, "INVALID_BODY")
+		return
+	}
+	created, err := h.svc.CreateEnrollment(r.Context(), user, studentID, w2, httpserver.RequestIDFromContext(r.Context()))
+	if err != nil {
+		h.respond(w, r, nil, err)
+		return
+	}
+	httpserver.WriteSuccess(w, http.StatusCreated, created)
+}
+
+func (h *Handler) getEnrollment(w http.ResponseWriter, r *http.Request) {
+	user, _ := httpserver.UserFromContext(r.Context())
+	id, ok := pathID(r, "id")
+	if !ok {
+		httpserver.WriteErrorFromContext(w, r, http.StatusNotFound, httpserver.CodeNotFound, "NOT_FOUND")
+		return
+	}
+	item, err := h.svc.GetEnrollment(r.Context(), user, id)
+	h.respond(w, r, item, err)
+}
+
+func (h *Handler) updateEnrollment(w http.ResponseWriter, r *http.Request) {
+	user, _ := httpserver.UserFromContext(r.Context())
+	id, ok := pathID(r, "id")
+	if !ok {
+		httpserver.WriteErrorFromContext(w, r, http.StatusNotFound, httpserver.CodeNotFound, "NOT_FOUND")
+		return
+	}
+	var w2 EnrollmentWrite
+	if err := json.NewDecoder(r.Body).Decode(&w2); err != nil {
+		httpserver.WriteErrorFromContext(w, r, http.StatusUnprocessableEntity, httpserver.CodeInvalidState, "INVALID_BODY")
+		return
+	}
+	updated, err := h.svc.UpdateEnrollment(r.Context(), user, id, w2, httpserver.RequestIDFromContext(r.Context()))
+	if err != nil {
+		h.respond(w, r, nil, err)
+		return
+	}
+	httpserver.WriteSuccess(w, http.StatusOK, updated)
+}
+
+// ---------- Assignment ----------
+
+func (h *Handler) listAssignments(w http.ResponseWriter, r *http.Request) {
+	user, _ := httpserver.UserFromContext(r.Context())
+	enrollmentID, ok := pathID(r, "id")
+	if !ok {
+		httpserver.WriteErrorFromContext(w, r, http.StatusNotFound, httpserver.CodeNotFound, "NOT_FOUND")
+		return
+	}
+	items, err := h.svc.ListAssignments(r.Context(), user, enrollmentID)
+	h.respond(w, r, items, err)
+}
+
+func (h *Handler) createAssignment(w http.ResponseWriter, r *http.Request) {
+	user, _ := httpserver.UserFromContext(r.Context())
+	enrollmentID, ok := pathID(r, "id")
+	if !ok {
+		httpserver.WriteErrorFromContext(w, r, http.StatusNotFound, httpserver.CodeNotFound, "NOT_FOUND")
+		return
+	}
+	var w2 AssignmentWrite
+	if err := json.NewDecoder(r.Body).Decode(&w2); err != nil {
+		httpserver.WriteErrorFromContext(w, r, http.StatusUnprocessableEntity, httpserver.CodeInvalidState, "INVALID_BODY")
+		return
+	}
+	created, err := h.svc.CreateAssignment(r.Context(), user, enrollmentID, w2, httpserver.RequestIDFromContext(r.Context()))
+	if err != nil {
+		h.respond(w, r, nil, err)
+		return
+	}
+	httpserver.WriteSuccess(w, http.StatusCreated, created)
+}
+
+func (h *Handler) endAssignment(w http.ResponseWriter, r *http.Request) {
+	user, _ := httpserver.UserFromContext(r.Context())
+	id, ok := pathID(r, "id")
+	if !ok {
+		httpserver.WriteErrorFromContext(w, r, http.StatusNotFound, httpserver.CodeNotFound, "NOT_FOUND")
+		return
+	}
+	var w2 EndAssignmentWrite
+	if err := json.NewDecoder(r.Body).Decode(&w2); err != nil {
+		// Body is optional; empty body is fine.
+		w2 = EndAssignmentWrite{}
+	}
+	ended, err := h.svc.EndAssignment(r.Context(), user, id, w2, httpserver.RequestIDFromContext(r.Context()))
+	if err != nil {
+		h.respond(w, r, nil, err)
+		return
+	}
+	httpserver.WriteSuccess(w, http.StatusOK, ended)
 }
 
 // ---------- helpers ----------

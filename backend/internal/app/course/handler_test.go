@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/prelove/zedu/backend/internal/app/course"
+	"github.com/prelove/zedu/backend/internal/app/directory"
 	"github.com/prelove/zedu/backend/internal/platform/auth"
 	"github.com/prelove/zedu/backend/internal/platform/database"
 	"github.com/prelove/zedu/backend/internal/platform/httpserver"
@@ -44,13 +45,19 @@ func newTestServer(t *testing.T) *testServer {
 	}
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	mux := httpserver.New()
+	directory.MountRoutes(mux, directory.NewHandler(db, logger), db, testJWTSecret)
 	course.MountRoutes(mux, course.NewHandler(db, logger), db, testJWTSecret)
 	srv := httptest.NewServer(logging.NewMiddleware(logger)(mux))
 	t.Cleanup(func() { srv.Close(); db.Close() })
 	return &testServer{db: db, srv: srv}
 }
 
-func newTestServerWithFaultDB(t *testing.T, faultDB repository.DB) *testServer {
+// newTestServerWithFaultDB creates a test server where the course handler uses
+// a fault-injecting DB wrapper (audit INSERT failures) while directory routes
+// and auth use the real DB. The same underlying *sql.DB is shared so seeded
+// data is visible to both. The fault wrapper factory is called with the real
+// *sql.DB to produce the faultDB.
+func newTestServerWithFaultDB(t *testing.T, faultFactory func(*sql.DB) repository.DB) *testServer {
 	t.Helper()
 	dsn := "file:" + filepath.Join(t.TempDir(), "course_fault.db")
 	db, err := database.Open(dsn)
@@ -61,8 +68,10 @@ func newTestServerWithFaultDB(t *testing.T, faultDB repository.DB) *testServer {
 		t.Fatalf("migrate: %v", err)
 	}
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	h := course.NewHandler(faultDB, logger)
+	faultDB := faultFactory(db)
 	mux := httpserver.New()
+	directory.MountRoutes(mux, directory.NewHandler(db, logger), db, testJWTSecret)
+	h := course.NewHandler(faultDB, logger)
 	course.MountRoutes(mux, h, db, testJWTSecret)
 	srv := httptest.NewServer(logging.NewMiddleware(logger)(mux))
 	t.Cleanup(func() { srv.Close(); db.Close() })
@@ -355,17 +364,9 @@ func (f *failingAuditDB) QueryContext(ctx context.Context, query string, args ..
 }
 
 func TestAuditFailureRollsBackDomainCreate(t *testing.T) {
-	dsn := "file:" + filepath.Join(t.TempDir(), "course_fault_audit.db")
-	db, err := database.Open(dsn)
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	if err := database.MigrateUp(db, filepath.Join("..", "..", "..", "migrations")); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
-	faultDB := &failingAuditDB{DB: db}
-	ts := newTestServerWithFaultDB(t, faultDB)
+	ts := newTestServerWithFaultDB(t, func(db *sql.DB) repository.DB {
+		return &failingAuditDB{DB: db}
+	})
 	ownerID := createUser(t, ts.db, "owner", "OWNER")
 	tok := tokenFor(t, ownerID, "OWNER")
 

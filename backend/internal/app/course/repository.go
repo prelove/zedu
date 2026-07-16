@@ -635,3 +635,366 @@ func boolToInt(b *bool, def bool) int {
 	}
 	return 0
 }
+
+// ========== Enrollment & Assignment (stage C) ==========
+
+// Enrollment is the read model for a student course enrollment. Financial
+// fields are intentionally omitted from the M2 API surface; they remain at
+// their schema defaults (0) and are not exposed or mutated here.
+type Enrollment struct {
+	ID             int64      `json:"id"`
+	StudentID      int64      `json:"studentId"`
+	DomainID       int64      `json:"domainId"`
+	TrackID        int64      `json:"trackId"`
+	CurrentLevelID *int64     `json:"currentLevelId,omitempty"`
+	TargetLevelID  *int64     `json:"targetLevelId,omitempty"`
+	EnrollmentType string     `json:"enrollmentType"`
+	Status         string     `json:"status"`
+	StartedAt      *time.Time `json:"startedAt,omitempty"`
+	EndedAt        *time.Time `json:"endedAt,omitempty"`
+	Note           string     `json:"note,omitempty"`
+	CreatedAt      time.Time  `json:"createdAt"`
+	UpdatedAt      time.Time  `json:"updatedAt"`
+}
+
+// Assignment is the read model for a student-teacher assignment.
+type Assignment struct {
+	ID           int64      `json:"id"`
+	EnrollmentID int64      `json:"enrollmentId"`
+	StudentID    int64      `json:"studentId"`
+	TeacherID    int64      `json:"teacherId"`
+	RoleType     string     `json:"roleType"`
+	RateAmount   *int64     `json:"rateAmount,omitempty"`
+	Status       string     `json:"status"`
+	StartDate    time.Time  `json:"startDate"`
+	EndDate      *time.Time `json:"endDate,omitempty"`
+	Reason       string     `json:"reason,omitempty"`
+	Note         string     `json:"note,omitempty"`
+	CreatedAt    time.Time  `json:"createdAt"`
+	UpdatedAt    time.Time  `json:"updatedAt"`
+}
+
+// EnrollmentWrite captures create/update fields for an enrollment. Financial
+// fields are deliberately absent: M2 does not create or mutate lesson balance,
+// charge or balance amounts.
+type EnrollmentWrite struct {
+	DomainID       *int64  `json:"domainId,omitempty"`
+	TrackID        *int64  `json:"trackId,omitempty"`
+	CurrentLevelID *int64  `json:"currentLevelId,omitempty"`
+	TargetLevelID  *int64  `json:"targetLevelId,omitempty"`
+	EnrollmentType *string `json:"enrollmentType,omitempty"`
+	Status         *string `json:"status,omitempty"`
+	StartedAt      *string `json:"startedAt,omitempty"`
+	Note           *string `json:"note,omitempty"`
+}
+
+// AssignmentWrite captures create fields for an assignment.
+type AssignmentWrite struct {
+	TeacherID *int64  `json:"teacherId,omitempty"`
+	RoleType  *string `json:"roleType,omitempty"`
+	Reason    *string `json:"reason,omitempty"`
+	Note      *string `json:"note,omitempty"`
+}
+
+// EndAssignmentWrite captures the body for POST /assignments/{id}/end.
+type EndAssignmentWrite struct {
+	Reason *string `json:"reason,omitempty"`
+}
+
+// ---------- Enrollment ----------
+
+// ListEnrollments returns enrollments for a student.
+func (r *Repository) ListEnrollments(ctx context.Context, exec repository.Executor, studentID int64) ([]Enrollment, error) {
+	rows, err := exec.QueryContext(ctx,
+		`SELECT id, student_id, domain_id, track_id, current_level_id, target_level_id, enrollment_type, status, started_at, ended_at, COALESCE(note,''), created_at, updated_at
+		 FROM student_course_enrollment WHERE student_id = ? AND deleted_at IS NULL ORDER BY id DESC`, studentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Enrollment
+	for rows.Next() {
+		var e Enrollment
+		var note string
+		if err := rows.Scan(&e.ID, &e.StudentID, &e.DomainID, &e.TrackID, &e.CurrentLevelID, &e.TargetLevelID, &e.EnrollmentType, &e.Status, &e.StartedAt, &e.EndedAt, &note, &e.CreatedAt, &e.UpdatedAt); err != nil {
+			return nil, err
+		}
+		e.Note = note
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// GetEnrollment returns a non-deleted enrollment by id.
+func (r *Repository) GetEnrollment(ctx context.Context, exec repository.Executor, id int64) (Enrollment, error) {
+	var e Enrollment
+	var note string
+	err := exec.QueryRowContext(ctx,
+		`SELECT id, student_id, domain_id, track_id, current_level_id, target_level_id, enrollment_type, status, started_at, ended_at, COALESCE(note,''), created_at, updated_at
+		 FROM student_course_enrollment WHERE id = ? AND deleted_at IS NULL`, id,
+	).Scan(&e.ID, &e.StudentID, &e.DomainID, &e.TrackID, &e.CurrentLevelID, &e.TargetLevelID, &e.EnrollmentType, &e.Status, &e.StartedAt, &e.EndedAt, &note, &e.CreatedAt, &e.UpdatedAt)
+	if err == sql.ErrNoRows {
+		return Enrollment{}, ErrNotFound
+	}
+	if err != nil {
+		return Enrollment{}, err
+	}
+	e.Note = note
+	return e, nil
+}
+
+// InsertEnrollment inserts a new enrollment. Financial fields use schema
+// defaults (0); M2 does not set charge/balance/lesson_balance.
+func (r *Repository) InsertEnrollment(ctx context.Context, exec repository.Executor, studentID int64, w EnrollmentWrite) (int64, error) {
+	res, err := exec.ExecContext(ctx,
+		`INSERT INTO student_course_enrollment (student_id, domain_id, track_id, current_level_id, target_level_id, enrollment_type, status, started_at, note)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		studentID, ptrInt64(w.DomainID), ptrInt64(w.TrackID), nullableInt64Ptr(w.CurrentLevelID), nullableInt64Ptr(w.TargetLevelID),
+		defaultStr(ptrString(w.EnrollmentType), "ONE_TO_ONE"), defaultStr(ptrString(w.Status), "ACTIVE"), nullableDate(ptrString(w.StartedAt)), nullableString(ptrString(w.Note)),
+	)
+	if err != nil {
+		return 0, err
+	}
+	id, err := res.LastInsertId()
+	return id, err
+}
+
+// UpdateEnrollment patches a non-deleted enrollment.
+func (r *Repository) UpdateEnrollment(ctx context.Context, exec repository.Executor, id int64, w EnrollmentWrite) error {
+	sets, args := buildEnrollmentSets(w)
+	if len(sets) == 0 {
+		return nil
+	}
+	args = append(args, id)
+	res, err := exec.ExecContext(ctx,
+		"UPDATE student_course_enrollment SET "+strings.Join(sets, ", ")+", updated_at = CURRENT_TIMESTAMP WHERE id = ? AND deleted_at IS NULL", args...)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func buildEnrollmentSets(w EnrollmentWrite) ([]string, []any) {
+	var sets []string
+	var args []any
+	if w.DomainID != nil {
+		sets, args = append(sets, "domain_id = ?"), append(args, *w.DomainID)
+	}
+	if w.TrackID != nil {
+		sets, args = append(sets, "track_id = ?"), append(args, *w.TrackID)
+	}
+	if w.CurrentLevelID != nil {
+		sets, args = append(sets, "current_level_id = ?"), append(args, nullableInt64Ptr(w.CurrentLevelID))
+	}
+	if w.TargetLevelID != nil {
+		sets, args = append(sets, "target_level_id = ?"), append(args, nullableInt64Ptr(w.TargetLevelID))
+	}
+	if w.EnrollmentType != nil {
+		sets, args = append(sets, "enrollment_type = ?"), append(args, *w.EnrollmentType)
+	}
+	if w.Status != nil {
+		sets, args = append(sets, "status = ?"), append(args, *w.Status)
+	}
+	if w.StartedAt != nil {
+		sets, args = append(sets, "started_at = ?"), append(args, nullableDate(*w.StartedAt))
+	}
+	if w.Note != nil {
+		sets, args = append(sets, "note = ?"), append(args, nullableString(*w.Note))
+	}
+	return sets, args
+}
+
+// ---------- Assignment ----------
+
+// ListAssignments returns assignments for an enrollment.
+func (r *Repository) ListAssignments(ctx context.Context, exec repository.Executor, enrollmentID int64) ([]Assignment, error) {
+	rows, err := exec.QueryContext(ctx,
+		`SELECT id, enrollment_id, student_id, teacher_id, role_type, rate_amount, status, start_date, end_date, COALESCE(reason,''), COALESCE(note,''), created_at, updated_at
+		 FROM student_teacher_assignment WHERE enrollment_id = ? ORDER BY id ASC`, enrollmentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Assignment
+	for rows.Next() {
+		var a Assignment
+		var reason, note string
+		if err := rows.Scan(&a.ID, &a.EnrollmentID, &a.StudentID, &a.TeacherID, &a.RoleType, &a.RateAmount, &a.Status, &a.StartDate, &a.EndDate, &reason, &note, &a.CreatedAt, &a.UpdatedAt); err != nil {
+			return nil, err
+		}
+		a.Reason = reason
+		a.Note = note
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+// GetAssignment returns an assignment by id.
+func (r *Repository) GetAssignment(ctx context.Context, exec repository.Executor, id int64) (Assignment, error) {
+	var a Assignment
+	var reason, note string
+	err := exec.QueryRowContext(ctx,
+		`SELECT id, enrollment_id, student_id, teacher_id, role_type, rate_amount, status, start_date, end_date, COALESCE(reason,''), COALESCE(note,''), created_at, updated_at
+		 FROM student_teacher_assignment WHERE id = ?`, id,
+	).Scan(&a.ID, &a.EnrollmentID, &a.StudentID, &a.TeacherID, &a.RoleType, &a.RateAmount, &a.Status, &a.StartDate, &a.EndDate, &reason, &note, &a.CreatedAt, &a.UpdatedAt)
+	if err == sql.ErrNoRows {
+		return Assignment{}, ErrNotFound
+	}
+	if err != nil {
+		return Assignment{}, err
+	}
+	a.Reason = reason
+	a.Note = note
+	return a, nil
+}
+
+// EndActiveAssignment ends the current ACTIVE assignment for an enrollment in
+// the current transaction. Returns the ended assignment id and whether a row
+// was ended. The WHERE status='ACTIVE' guard plus the partial unique index make
+// this safe under concurrency: only one ACTIVE can exist, and ending it removes
+// it from the index so the subsequent insert cannot conflict.
+func (r *Repository) EndActiveAssignment(ctx context.Context, exec repository.Executor, enrollmentID int64, reason string) (int64, bool, error) {
+	today := time.Now().UTC().Format("2006-01-02")
+	res, err := exec.ExecContext(ctx,
+		`UPDATE student_teacher_assignment SET status = 'ENDED', end_date = ?, reason = ?, updated_at = CURRENT_TIMESTAMP
+		 WHERE enrollment_id = ? AND status = 'ACTIVE'`,
+		today, reason, enrollmentID)
+	if err != nil {
+		return 0, false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, false, err
+	}
+	if n == 0 {
+		return 0, false, nil
+	}
+	// Return the id of the row we just ended.
+	var id int64
+	err = exec.QueryRowContext(ctx, `SELECT id FROM student_teacher_assignment WHERE enrollment_id = ? AND status = 'ENDED' ORDER BY updated_at DESC, id DESC LIMIT 1`, enrollmentID).Scan(&id)
+	if err != nil {
+		return 0, true, err
+	}
+	return id, true, nil
+}
+
+// InsertAssignment inserts a new ACTIVE assignment. The partial unique index
+// idx_assign_enrollment_active guarantees at most one ACTIVE per enrollment; a
+// concurrent insert that violates it returns a UNIQUE error mapped to
+// ErrConflict by the caller.
+func (r *Repository) InsertAssignment(ctx context.Context, exec repository.Executor, enrollmentID, studentID, teacherID int64, w AssignmentWrite) (int64, error) {
+	today := time.Now().UTC().Format("2006-01-02")
+	res, err := exec.ExecContext(ctx,
+		`INSERT INTO student_teacher_assignment (enrollment_id, student_id, teacher_id, role_type, status, start_date, reason, note)
+		 VALUES (?, ?, ?, ?, 'ACTIVE', ?, ?, ?)`,
+		enrollmentID, studentID, teacherID, defaultStr(ptrString(w.RoleType), "MAIN"), today,
+		nullableString(ptrString(w.Reason)), nullableString(ptrString(w.Note)),
+	)
+	if err != nil {
+		if isUniqueViolation(err) {
+			return 0, ErrConflict
+		}
+		return 0, err
+	}
+	id, err := res.LastInsertId()
+	return id, err
+}
+
+// EndAssignmentByID ends a specific assignment only if it is currently ACTIVE.
+// Returns (ended bool, err). ended=false means the assignment was not ACTIVE
+// (already ended or paused), so the caller returns 42201; a concurrent end
+// surfaces as ended=false rather than a half-written record.
+func (r *Repository) EndAssignmentByID(ctx context.Context, exec repository.Executor, id int64, reason string) (bool, error) {
+	today := time.Now().UTC().Format("2006-01-02")
+	res, err := exec.ExecContext(ctx,
+		`UPDATE student_teacher_assignment SET status = 'ENDED', end_date = ?, reason = ?, updated_at = CURRENT_TIMESTAMP
+		 WHERE id = ? AND status = 'ACTIVE'`,
+		today, reason, id)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
+// CountActiveAssignments returns the number of ACTIVE assignments for an
+// enrollment. Used by tests/invariants; the partial unique index keeps this at
+// 0 or 1.
+func (r *Repository) CountActiveAssignments(ctx context.Context, exec repository.Executor, enrollmentID int64) (int, error) {
+	var n int
+	err := exec.QueryRowContext(ctx, `SELECT COUNT(*) FROM student_teacher_assignment WHERE enrollment_id = ? AND status = 'ACTIVE'`, enrollmentID).Scan(&n)
+	return n, err
+}
+
+// ---------- helpers ----------
+
+func nullableInt64Ptr(i *int64) any {
+	if i == nil {
+		return nil
+	}
+	return *i
+}
+
+// nullableDate returns nil for an empty string, else the string for a nullable
+// TEXT/DATE column. SQLite stores dates as TEXT; we keep the raw value.
+func nullableDate(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
+// nullableString returns nil for an empty string, else the string for a nullable
+// TEXT column.
+func nullableString(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
+// GetStudentActive returns a non-deleted student only if its status is ACTIVE.
+// Used by enrollment creation: ENDED or missing students yield ErrInvalidState
+// (per the frozen contract, missing/ended student -> 42201) rather than
+// ErrNotFound, so callers do not disclose existence separately.
+func (r *Repository) GetStudentActive(ctx context.Context, exec repository.Executor, id int64) (struct{}, error) {
+	var status string
+	err := exec.QueryRowContext(ctx, `SELECT status FROM student WHERE id = ? AND deleted_at IS NULL`, id).Scan(&status)
+	if err == sql.ErrNoRows {
+		return struct{}{}, ErrInvalidState
+	}
+	if err != nil {
+		return struct{}{}, err
+	}
+	if status != "ACTIVE" {
+		return struct{}{}, ErrInvalidState
+	}
+	return struct{}{}, nil
+}
+
+// GetTeacherActive returns a non-deleted teacher only if its status is ACTIVE.
+// Used by assignment creation: a non-active teacher yields ErrInvalidState.
+func (r *Repository) GetTeacherActive(ctx context.Context, exec repository.Executor, id int64) (struct{}, error) {
+	var status string
+	err := exec.QueryRowContext(ctx, `SELECT status FROM teacher WHERE id = ? AND deleted_at IS NULL`, id).Scan(&status)
+	if err == sql.ErrNoRows {
+		return struct{}{}, ErrInvalidState
+	}
+	if err != nil {
+		return struct{}{}, err
+	}
+	if status != "ACTIVE" {
+		return struct{}{}, ErrInvalidState
+	}
+	return struct{}{}, nil
+}
