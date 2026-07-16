@@ -10,6 +10,7 @@ import (
 	"time"
 
 	appauth "github.com/prelove/zedu/backend/internal/app/auth"
+	"github.com/prelove/zedu/backend/internal/app/onboarding"
 	"github.com/prelove/zedu/backend/internal/platform/auth"
 	"github.com/prelove/zedu/backend/internal/platform/database"
 	"github.com/prelove/zedu/backend/internal/platform/httpserver"
@@ -50,6 +51,7 @@ func main() {
 	}
 	authHandler := appauth.NewHandler(db, jwtSecret, logger)
 	mux = appauth.MountRoutes(mux, authHandler, db)
+	onboarding.MountRoutes(mux, onboarding.NewHandler(db, logger), db, jwtSecret)
 	handler := logging.NewMiddleware(logger)(mux)
 
 	port := os.Getenv("PORT")

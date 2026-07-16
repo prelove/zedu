@@ -6,7 +6,7 @@
 |---|---|---|---|---|---|---|
 | M2-CODEX-01 | Codex | 契约、依赖与负面范围冻结 | ACCEPTED | M1 ACCEPTED | docs/tasks/M2、docs/acceptance/evidence/M2、OpenSpec task状态 | Codex/PM |
 | M2-GLM-01 | GLM | 安全基础、统一契约、M2 迁移、认证/RBAC | ACCEPTED | M2-CODEX-01 | 已合并 `main`（PR #2）；证据 `docs/acceptance/evidence/M2/GLM-01.md` | Codex + 独立 Reviewer |
-| M2-GLM-02A | GLM | 初始化、受限重置 API（M2-GLM-02 的第一个切片） | READY | M2-GLM-01 ACCEPTED | `backend/internal/app/onboarding/**`、必要路由装配及测试；默认不得新增迁移 | Codex + 独立 Reviewer |
+| M2-GLM-02A | Codex | 初始化、受限重置 API（M2-GLM-02 的第一个切片） | IN_REVIEW | M2-GLM-01 ACCEPTED | `backend/internal/app/onboarding/**`、必要路由装配及测试；默认不得新增迁移 | Codex + 独立 Reviewer |
 | M2-GLM-02B/02C | GLM | 人员资料；课程/报名/安排 API | BLOCKED | M2-GLM-02A ACCEPTED 后逐项发布 | `backend/internal/app/directory/**`、`course/**`、必要路由装配及测试 | Codex + 独立 Reviewer |
 | M2-KIMI-01 | Kimi | 前端路由、认证、登录与初始化界面 | READY | M2-GLM-01 的认证契约 ACCEPTED | `frontend/package*.json`、`frontend/src/router/**`、`api/**`、`stores/**`、`features/auth/**`、`features/onboarding/**`、i18n与测试 | Codex + 独立 Reviewer |
 | M2-KIMI-02 | Kimi | 人员、课程、报名、安排页面 | BLOCKED | M2-GLM-02 API ACCEPTED、M2-KIMI-01 ACCEPTED | `frontend/src/features/directory/**`、`course/**`、i18n与测试 | Codex + 独立 Reviewer |

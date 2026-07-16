@@ -4,8 +4,8 @@
 
 | 项目 | 内容 |
 |---|---|
-| 状态 | READY |
-| Owner | GLM |
+| 状态 | IN_REVIEW |
+| Owner | Codex |
 | 基线 | `main` 的 M2-GLM-01 已验收状态（PR #2 / merge commit `15a9c0a`） |
 | OpenSpec | `add-m2-core-management` 任务 2.1；`onboarding-initialization` spec |
 | 依据 | PRD v3.1 §5.2–§5.4、OpenSpec design §4、`contract-freeze.md` |
@@ -55,8 +55,9 @@ go version                 # 必须 go1.23.3
 go fmt ./...
 go vet ./...
 go test ./... -count=1
-go test ./... -count=20
 go build ./cmd/zedu-server
 ```
+
+`go test ./... -count=20` 留待 M2 里程碑候选验收或出现非确定性失败时执行；本切片仍必须运行定向的并发、权限与事务故障注入测试。
 
 提交必须遵循 Lore Commit Protocol，且只暂存允许范围文件。交付报告必须给出：基线 SHA、红灯→绿灯证据、完整改动文件、测试与上述场景的对应关系、未测试项、回滚方式与风险。不得更新 OpenSpec 勾选、状态、路线图或合并 `main`；等待 Codex 独立验收。
