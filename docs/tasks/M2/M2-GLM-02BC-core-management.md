@@ -108,7 +108,7 @@ http handler (decode/context/encode)
 2. 允许先创建无老师 assignment 的 enrollment；M2 不创建 lesson，也不写任何财务、通知、邮件或 payout 数据。
 3. `enrollment.status` 仅允许 `ACTIVE → PAUSED → ACTIVE`、`ACTIVE → COMPLETED`、`ACTIVE/PAUSED → CANCELLED`；终态不得恢复。拒绝状态迁移为 `42201`。
 4. assignment 只能连接 active enrollment 与 active teacher；一个 enrollment 最多一条 ACTIVE assignment。创建新 ACTIVE assignment 若已有 ACTIVE，必须以单事务结束旧记录、创建新记录并保留 reason/history（“替换”）；不得依赖应用层先查后写来规避唯一索引。
-5. `/assignments/{id}/end` 只能结束该 enrollment 的当前合法 assignment；ENDED 不可恢复。并发替换只有一个提交者成功，其余返回稳定的 `40901` 或 `42201`，不得泄露 DB 文本，也不得留下半结束记录。
+5. `/assignments/{id}/end` 只能结束该 enrollment 的当前合法 assignment；ENDED 不可恢复。并发替换必须始终保持至多一条 ACTIVE assignment；每个成功替换的旧记录结束、新记录创建与审计必须原子一致。当前冻结契约无版本号/If-Match 前置条件，不强行规定并发有效请求必须只有一个成功；不得泄露 DB 文本或留下半结束记录。
 6. enrollment/assignment 每个成功写操作均含同事务审计；替换的旧结束、新建与审计要么全部提交，要么全部回滚。
 
 ## 必须先红后绿的测试矩阵

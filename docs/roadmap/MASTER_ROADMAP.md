@@ -38,5 +38,5 @@
 - M2-CODEX-01（契约冻结）：ACCEPTED。
 - M2-GLM-01（认证/RBAC/M2 基础迁移）：ACCEPTED；PR #2 已于 2026-07-16 合并至 `main`。Windows 与 Ubuntu CI 全绿，Ubuntu 已通过 `go test ./... -race -count=1`；独立验收证据见 `docs/acceptance/evidence/M2/GLM-01.md`。
 - M2-GLM-02A（显式初始化与受限重置）：ACCEPTED；`3bc4078` 已合并 `main`，Windows/Ubuntu CI 与 Linux race 全绿，证据见 `docs/acceptance/evidence/M2/GLM-02A.md`。
-- M2-GLM-02B/02C 已进入 IN_PROGRESS：GLM 按 `docs/tasks/M2/M2-GLM-02BC-core-management.md` 分阶段实现人员资料、课程字典、报名与师生安排；新领域强制 `HTTP → application → repository` 分层，不回溯重构已验收认证/初始化。
+- M2-GLM-02B/02C 首轮验收为 CHANGES_REQUESTED：修复清单见 `docs/tasks/M2/M2-GLM-02BC-review-feedback.md`。完成列表契约、ACTIVE 学生约束、字典完整性、等级历史与错误事务语义的 P1 后再进入复验；新领域继续保持 `HTTP → application → repository` 分层，不回溯重构已验收认证/初始化。
 - M2-KIMI-01 仍为 READY（认证前端）；M2-KIMI-02 与 M2-CODEX-02 仍按依赖阻塞。
