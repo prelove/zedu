@@ -37,4 +37,5 @@
 
 - M2-CODEX-01（契约冻结）：ACCEPTED。
 - M2-GLM-01（认证/RBAC/M2 基础迁移）：ACCEPTED；PR #2 已于 2026-07-16 合并至 `main`。Windows 与 Ubuntu CI 全绿，Ubuntu 已通过 `go test ./... -race -count=1`；独立验收证据见 `docs/acceptance/evidence/M2/GLM-01.md`。
-- 当前 READY：M2-GLM-02A（显式初始化与受限重置）及 M2-KIMI-01（认证前端）。M2-GLM-02B/02C、M2-KIMI-02 与 M2-CODEX-02 仍按依赖阻塞。
+- M2-GLM-02A（显式初始化与受限重置）：ACCEPTED；`3bc4078` 已合并 `main`，Windows/Ubuntu CI 与 Linux race 全绿，证据见 `docs/acceptance/evidence/M2/GLM-02A.md`。
+- 当前 READY：M2-GLM-02B/02C（人员资料、课程/报名/安排的具体实现）及 M2-KIMI-01（认证前端）。M2-KIMI-02 与 M2-CODEX-02 仍按依赖阻塞。
