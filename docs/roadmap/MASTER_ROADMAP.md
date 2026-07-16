@@ -1,6 +1,6 @@
 # Zedu 总路线图
 
-> 当前焦点：M2 核心资料与认证。更新日期：2026-07-12。进度以验收门禁而非主观百分比计算。
+> 当前焦点：M2 初始化切片。更新日期：2026-07-16。进度以验收门禁而非主观百分比计算。
 
 | 里程碑 | 能力 | 状态 | 退出条件 |
 |---|---|---|---|
@@ -32,3 +32,9 @@
 - 结论：ACCEPTED；GitHub Actions run `29153829469` 全绿。
 - 证据：`docs/acceptance/evidence/M1/verification-report.md`。
 - 下一关：M2 OpenSpec 规格冻结，不允许绕过该关直接实现业务功能。
+
+## M2 当前进度
+
+- M2-CODEX-01（契约冻结）：ACCEPTED。
+- M2-GLM-01（认证/RBAC/M2 基础迁移）：ACCEPTED；PR #2 已于 2026-07-16 合并至 `main`。Windows 与 Ubuntu CI 全绿，Ubuntu 已通过 `go test ./... -race -count=1`；独立验收证据见 `docs/acceptance/evidence/M2/GLM-01.md`。
+- 当前 READY：M2-GLM-02A（显式初始化与受限重置）及 M2-KIMI-01（认证前端）。M2-GLM-02B/02C、M2-KIMI-02 与 M2-CODEX-02 仍按依赖阻塞。

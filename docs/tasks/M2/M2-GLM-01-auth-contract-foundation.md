@@ -4,9 +4,9 @@
 
 | 项目 | 内容 |
 |---|---|
-| 状态 | READY |
+| 状态 | ACCEPTED |
 | Owner | GLM |
-| 建议分支 | `m2/glm-auth-foundation`，从 `main` 的 `ad9c661` 创建 |
+| 合并记录 | PR #2，merge commit `15a9c0a`；独立验收证据见 `docs/acceptance/evidence/M2/GLM-01.md` |
 | OpenSpec | `add-m2-core-management` 的 1.1、1.2、1.3 |
 | 依据 | `docs/acceptance/evidence/M2/contract-freeze.md`、四项 M2 specs、PRD v3.1-r1、ADR-007 |
 | 交付目标 | 可由前端消费的认证 API 与可迁移的 M2 数据基础；不实现初始化、人员、课程、报名或页面 |
