@@ -142,6 +142,11 @@ func validateStudentWrite(w StudentWrite, isCreate bool) error {
 		if w.Name == nil || strings.TrimSpace(*w.Name) == "" {
 			return ErrInvalidState
 		}
+	} else {
+		// P2-2: an empty PATCH body is not a valid write.
+		if w == (StudentWrite{}) {
+			return ErrInvalidState
+		}
 	}
 	if w.Name != nil && strings.TrimSpace(*w.Name) == "" {
 		return ErrInvalidState
@@ -219,21 +224,30 @@ func (s *Service) UpdateParent(ctx context.Context, u httpserver.AuthUser, stude
 	return updated, nil
 }
 
-// ListParents returns parents for a student.
-func (s *Service) ListParents(ctx context.Context, u httpserver.AuthUser, studentID int64) ([]Parent, error) {
+// ListParents returns a page of parents for a student.
+func (s *Service) ListParents(ctx context.Context, u httpserver.AuthUser, studentID int64, page, pageSize int) (httpserver.ListData, error) {
 	a := fromUser(u)
 	if err := a.authorize(); err != nil {
-		return nil, err
+		return httpserver.ListData{}, err
 	}
 	if _, err := s.repo.GetStudent(ctx, s.db, studentID); err != nil {
-		return nil, err
+		return httpserver.ListData{}, err
 	}
-	return s.repo.ListParents(ctx, s.db, studentID)
+	items, total, err := s.repo.ListParents(ctx, s.db, studentID, pageSize, (page-1)*pageSize)
+	if err != nil {
+		return httpserver.ListData{}, err
+	}
+	return httpserver.NewListData(items, total, httpserver.PageQuery{Page: page, PageSize: pageSize}), nil
 }
 
 func validateParentWrite(w ParentWrite, isCreate bool) error {
 	if isCreate {
 		if w.Name == nil || strings.TrimSpace(*w.Name) == "" {
+			return ErrInvalidState
+		}
+	} else {
+		// P2-2: an empty PATCH body is not a valid write.
+		if w == (ParentWrite{}) {
 			return ErrInvalidState
 		}
 	}
@@ -333,6 +347,11 @@ func (s *Service) ListTeachers(ctx context.Context, u httpserver.AuthUser, statu
 func validateTeacherWrite(w TeacherWrite, isCreate bool) error {
 	if isCreate {
 		if w.Name == nil || strings.TrimSpace(*w.Name) == "" {
+			return ErrInvalidState
+		}
+	} else {
+		// P2-2: an empty PATCH body is not a valid write.
+		if w == (TeacherWrite{}) {
 			return ErrInvalidState
 		}
 	}
@@ -435,21 +454,30 @@ func (s *Service) UpdateCapability(ctx context.Context, u httpserver.AuthUser, t
 	return updated, nil
 }
 
-// ListCapabilities returns capabilities for a teacher.
-func (s *Service) ListCapabilities(ctx context.Context, u httpserver.AuthUser, teacherID int64) ([]Capability, error) {
+// ListCapabilities returns a page of capabilities for a teacher.
+func (s *Service) ListCapabilities(ctx context.Context, u httpserver.AuthUser, teacherID int64, page, pageSize int) (httpserver.ListData, error) {
 	a := fromUser(u)
 	if err := a.authorize(); err != nil {
-		return nil, err
+		return httpserver.ListData{}, err
 	}
 	if _, err := s.repo.GetTeacher(ctx, s.db, teacherID); err != nil {
-		return nil, err
+		return httpserver.ListData{}, err
 	}
-	return s.repo.ListCapabilities(ctx, s.db, teacherID)
+	items, total, err := s.repo.ListCapabilities(ctx, s.db, teacherID, pageSize, (page-1)*pageSize)
+	if err != nil {
+		return httpserver.ListData{}, err
+	}
+	return httpserver.NewListData(items, total, httpserver.PageQuery{Page: page, PageSize: pageSize}), nil
 }
 
 func validateCapabilityWrite(w CapabilityWrite, isCreate bool) error {
 	if isCreate {
 		if w.DomainID == nil || w.TrackID == nil || w.LevelID == nil {
+			return ErrInvalidState
+		}
+	} else {
+		// P2-2: an empty PATCH body is not a valid write.
+		if w == (CapabilityWrite{}) {
 			return ErrInvalidState
 		}
 	}
@@ -522,7 +550,18 @@ func (s *Service) UpdateAvailability(ctx context.Context, u httpserver.AuthUser,
 		if err := validateTimeRange(weekday, start, end); err != nil {
 			return err
 		}
-		if err := validateEffectiveRange(ptrString(w.EffectiveFrom), ptrString(w.EffectiveTo)); err != nil {
+		// P2-1: merge the patch with the existing effective range before
+		// validating, so a patch that only sets effective_from is checked
+		// against the existing effective_to (and vice versa).
+		effFrom := ptrString(w.EffectiveFrom)
+		effTo := ptrString(w.EffectiveTo)
+		if effFrom == "" && existing.EffectiveFrom != nil {
+			effFrom = existing.EffectiveFrom.Format("2006-01-02")
+		}
+		if effTo == "" && existing.EffectiveTo != nil {
+			effTo = existing.EffectiveTo.Format("2006-01-02")
+		}
+		if err := validateEffectiveRange(effFrom, effTo); err != nil {
 			return err
 		}
 		if err := s.repo.UpdateAvailability(ctx, tx, teacherID, availID, w); err != nil {
@@ -540,21 +579,30 @@ func (s *Service) UpdateAvailability(ctx context.Context, u httpserver.AuthUser,
 	return updated, nil
 }
 
-// ListAvailability returns availability slots for a teacher.
-func (s *Service) ListAvailability(ctx context.Context, u httpserver.AuthUser, teacherID int64) ([]Availability, error) {
+// ListAvailability returns a page of availability slots for a teacher.
+func (s *Service) ListAvailability(ctx context.Context, u httpserver.AuthUser, teacherID int64, page, pageSize int) (httpserver.ListData, error) {
 	a := fromUser(u)
 	if err := a.authorize(); err != nil {
-		return nil, err
+		return httpserver.ListData{}, err
 	}
 	if _, err := s.repo.GetTeacher(ctx, s.db, teacherID); err != nil {
-		return nil, err
+		return httpserver.ListData{}, err
 	}
-	return s.repo.ListAvailability(ctx, s.db, teacherID)
+	items, total, err := s.repo.ListAvailability(ctx, s.db, teacherID, pageSize, (page-1)*pageSize)
+	if err != nil {
+		return httpserver.ListData{}, err
+	}
+	return httpserver.NewListData(items, total, httpserver.PageQuery{Page: page, PageSize: pageSize}), nil
 }
 
 func validateAvailabilityWrite(w AvailabilityWrite, isCreate bool) error {
 	if isCreate {
 		if w.Weekday == nil || w.StartTime == nil || w.EndTime == nil {
+			return ErrInvalidState
+		}
+	} else {
+		// P2-2: an empty PATCH body is not a valid write.
+		if w == (AvailabilityWrite{}) {
 			return ErrInvalidState
 		}
 	}
@@ -654,16 +702,26 @@ func isValidEmail(s string) bool {
 // only multi-table write boundary: every business write and the audit row share
 // it, so any error rolls back both. A nil error from fn commits; otherwise the
 // transaction is rolled back.
+//
+// If the business function returns a validation/conflict error but Rollback
+// itself fails, the final error is ErrDatabase (50002) — not the original
+// validation error — because the transaction state is indeterminate. BeginTx
+// and Commit failures also return ErrDatabase.
 func (s *Service) inTx(ctx context.Context, fn func(repository.Tx) error) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return repository.ErrDatabase
 	}
 	if err := fn(tx); err != nil {
-		_ = tx.Rollback()
+		if rbErr := tx.Rollback(); rbErr != nil {
+			return repository.ErrDatabase
+		}
 		return err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return repository.ErrDatabase
+	}
+	return nil
 }
 
 // audit writes a non-sensitive operation_log row within the transaction. The

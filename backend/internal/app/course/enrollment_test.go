@@ -153,7 +153,7 @@ func TestListEnrollmentsForStudent(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("expected 200, got %d", status)
 	}
-	items := body["data"].([]any)
+	items := dataMap(t, body)["items"].([]any)
 	if len(items) != 2 {
 		t.Fatalf("expected 2 enrollments, got %d", len(items))
 	}
@@ -202,7 +202,7 @@ func TestCreateAssignmentAndAtomicReplacement(t *testing.T) {
 
 	// Old assignment is ENDED.
 	_, oldBody := req(t, "GET", fmt.Sprintf("%s/enrollments/%d/assignments", ts.srv.URL, enrID), tok, nil)
-	items := oldBody["data"].([]any)
+	items := dataMap(t, oldBody)["items"].([]any)
 	var oldAssign, newAssign map[string]any
 	for _, item := range items {
 		m := item.(map[string]any)
@@ -335,7 +335,7 @@ func TestListAssignmentsForEnrollment(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("expected 200, got %d", status)
 	}
-	items := body["data"].([]any)
+	items := dataMap(t, body)["items"].([]any)
 	if len(items) != 2 {
 		t.Fatalf("expected 2 assignments (history preserved), got %d", len(items))
 	}

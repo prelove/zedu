@@ -704,25 +704,29 @@ type EndAssignmentWrite struct {
 // ---------- Enrollment ----------
 
 // ListEnrollments returns enrollments for a student.
-func (r *Repository) ListEnrollments(ctx context.Context, exec repository.Executor, studentID int64) ([]Enrollment, error) {
+func (r *Repository) ListEnrollments(ctx context.Context, exec repository.Executor, studentID int64, limit, offset int) ([]Enrollment, int, error) {
+	var total int
+	if err := exec.QueryRowContext(ctx, `SELECT COUNT(*) FROM student_course_enrollment WHERE student_id = ? AND deleted_at IS NULL`, studentID).Scan(&total); err != nil {
+		return nil, 0, err
+	}
 	rows, err := exec.QueryContext(ctx,
 		`SELECT id, student_id, domain_id, track_id, current_level_id, target_level_id, enrollment_type, status, started_at, ended_at, COALESCE(note,''), created_at, updated_at
-		 FROM student_course_enrollment WHERE student_id = ? AND deleted_at IS NULL ORDER BY id DESC`, studentID)
+		 FROM student_course_enrollment WHERE student_id = ? AND deleted_at IS NULL ORDER BY id DESC LIMIT ? OFFSET ?`, studentID, limit, offset)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer rows.Close()
-	var out []Enrollment
+	out := []Enrollment{}
 	for rows.Next() {
 		var e Enrollment
 		var note string
 		if err := rows.Scan(&e.ID, &e.StudentID, &e.DomainID, &e.TrackID, &e.CurrentLevelID, &e.TargetLevelID, &e.EnrollmentType, &e.Status, &e.StartedAt, &e.EndedAt, &note, &e.CreatedAt, &e.UpdatedAt); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		e.Note = note
 		out = append(out, e)
 	}
-	return out, rows.Err()
+	return out, total, rows.Err()
 }
 
 // GetEnrollment returns a non-deleted enrollment by id.
@@ -813,27 +817,31 @@ func buildEnrollmentSets(w EnrollmentWrite) ([]string, []any) {
 
 // ---------- Assignment ----------
 
-// ListAssignments returns assignments for an enrollment.
-func (r *Repository) ListAssignments(ctx context.Context, exec repository.Executor, enrollmentID int64) ([]Assignment, error) {
+// ListAssignments returns a page of assignments for an enrollment.
+func (r *Repository) ListAssignments(ctx context.Context, exec repository.Executor, enrollmentID int64, limit, offset int) ([]Assignment, int, error) {
+	var total int
+	if err := exec.QueryRowContext(ctx, `SELECT COUNT(*) FROM student_teacher_assignment WHERE enrollment_id = ?`, enrollmentID).Scan(&total); err != nil {
+		return nil, 0, err
+	}
 	rows, err := exec.QueryContext(ctx,
 		`SELECT id, enrollment_id, student_id, teacher_id, role_type, rate_amount, status, start_date, end_date, COALESCE(reason,''), COALESCE(note,''), created_at, updated_at
-		 FROM student_teacher_assignment WHERE enrollment_id = ? ORDER BY id ASC`, enrollmentID)
+		 FROM student_teacher_assignment WHERE enrollment_id = ? ORDER BY id ASC LIMIT ? OFFSET ?`, enrollmentID, limit, offset)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer rows.Close()
-	var out []Assignment
+	out := []Assignment{}
 	for rows.Next() {
 		var a Assignment
 		var reason, note string
 		if err := rows.Scan(&a.ID, &a.EnrollmentID, &a.StudentID, &a.TeacherID, &a.RoleType, &a.RateAmount, &a.Status, &a.StartDate, &a.EndDate, &reason, &note, &a.CreatedAt, &a.UpdatedAt); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		a.Reason = reason
 		a.Note = note
 		out = append(out, a)
 	}
-	return out, rows.Err()
+	return out, total, rows.Err()
 }
 
 // GetAssignment returns an assignment by id.
@@ -997,4 +1005,57 @@ func (r *Repository) GetTeacherActive(ctx context.Context, exec repository.Execu
 		return struct{}{}, ErrInvalidState
 	}
 	return struct{}{}, nil
+}
+
+// ---------- reference-count helpers (P1-3) ----------
+
+// CountCapabilitiesByTrack returns the number of teacher_capability rows
+// referencing the given track.
+func (r *Repository) CountCapabilitiesByTrack(ctx context.Context, exec repository.Executor, trackID int64) (int, error) {
+	var n int
+	err := exec.QueryRowContext(ctx, `SELECT COUNT(*) FROM teacher_capability WHERE track_id = ?`, trackID).Scan(&n)
+	return n, err
+}
+
+// CountEnrollmentsByTrack returns the number of non-deleted enrollments
+// referencing the given track.
+func (r *Repository) CountEnrollmentsByTrack(ctx context.Context, exec repository.Executor, trackID int64) (int, error) {
+	var n int
+	err := exec.QueryRowContext(ctx, `SELECT COUNT(*) FROM student_course_enrollment WHERE track_id = ? AND deleted_at IS NULL`, trackID).Scan(&n)
+	return n, err
+}
+
+// CountEnrollmentsByLevel returns the number of non-deleted enrollments
+// referencing the given level as current or target.
+func (r *Repository) CountEnrollmentsByLevel(ctx context.Context, exec repository.Executor, levelID int64) (int, error) {
+	var n int
+	err := exec.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM student_course_enrollment
+		 WHERE (current_level_id = ? OR target_level_id = ?) AND deleted_at IS NULL`, levelID, levelID).Scan(&n)
+	return n, err
+}
+
+// CountCapabilitiesByLevel returns the number of teacher_capability rows
+// referencing the given level.
+func (r *Repository) CountCapabilitiesByLevel(ctx context.Context, exec repository.Executor, levelID int64) (int, error) {
+	var n int
+	err := exec.QueryRowContext(ctx, `SELECT COUNT(*) FROM teacher_capability WHERE level_id = ?`, levelID).Scan(&n)
+	return n, err
+}
+
+// ---------- level event (P1-4) ----------
+
+// InsertLevelEvent writes a student_level_event row within the current
+// transaction. The enrollment's current_level_id is NOT updated by this call;
+// the caller decides whether to update it. eventDate is the UTC date string.
+func (r *Repository) InsertLevelEvent(ctx context.Context, exec repository.Executor, studentID, enrollmentID int64, fromLevelID, toLevelID *int64, eventType, eventDate string, operatorID int64) error {
+	var from any
+	if fromLevelID != nil {
+		from = *fromLevelID
+	}
+	_, err := exec.ExecContext(ctx,
+		`INSERT INTO student_level_event (student_id, enrollment_id, from_level_id, to_level_id, event_type, event_date, operator_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		studentID, enrollmentID, from, *toLevelID, eventType, eventDate, operatorID)
+	return err
 }

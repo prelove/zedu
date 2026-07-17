@@ -351,21 +351,25 @@ func buildStudentSets(w StudentWrite) ([]string, []any) {
 // ---------- Parent ----------
 
 // ListParents returns parents for a student.
-func (r *Repository) ListParents(ctx context.Context, exec repository.Executor, studentID int64) ([]Parent, error) {
+func (r *Repository) ListParents(ctx context.Context, exec repository.Executor, studentID int64, limit, offset int) ([]Parent, int, error) {
+	var total int
+	if err := exec.QueryRowContext(ctx, `SELECT COUNT(*) FROM parent WHERE student_id = ?`, studentID).Scan(&total); err != nil {
+		return nil, 0, err
+	}
 	rows, err := exec.QueryContext(ctx,
 		`SELECT id, student_id, name, COALESCE(email,''), COALESCE(phone,''), COALESCE(relationship,''), is_primary, COALESCE(note,''), created_at, updated_at
-		 FROM parent WHERE student_id = ? ORDER BY is_primary DESC, id ASC`, studentID)
+		 FROM parent WHERE student_id = ? ORDER BY is_primary DESC, id ASC LIMIT ? OFFSET ?`, studentID, limit, offset)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer rows.Close()
-	var out []Parent
+	out := []Parent{}
 	for rows.Next() {
 		var p Parent
 		var email, phone, relationship, note string
 		var isPrimary int
 		if err := rows.Scan(&p.ID, &p.StudentID, &p.Name, &email, &phone, &relationship, &isPrimary, &note, &p.CreatedAt, &p.UpdatedAt); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		p.Email = email
 		p.Phone = phone
@@ -374,7 +378,7 @@ func (r *Repository) ListParents(ctx context.Context, exec repository.Executor, 
 		p.Note = note
 		out = append(out, p)
 	}
-	return out, rows.Err()
+	return out, total, rows.Err()
 }
 
 // GetParent returns a parent only if it belongs to the given student; otherwise
@@ -620,28 +624,32 @@ func buildTeacherSets(w TeacherWrite) ([]string, []any) {
 // ---------- Capability ----------
 
 // ListCapabilities returns capabilities for a teacher.
-func (r *Repository) ListCapabilities(ctx context.Context, exec repository.Executor, teacherID int64) ([]Capability, error) {
+func (r *Repository) ListCapabilities(ctx context.Context, exec repository.Executor, teacherID int64, limit, offset int) ([]Capability, int, error) {
+	var total int
+	if err := exec.QueryRowContext(ctx, `SELECT COUNT(*) FROM teacher_capability WHERE teacher_id = ?`, teacherID).Scan(&total); err != nil {
+		return nil, 0, err
+	}
 	rows, err := exec.QueryContext(ctx,
 		`SELECT id, teacher_id, domain_id, track_id, level_id, COALESCE(skill_tag_codes,''), status, verified, effective_from, effective_to, COALESCE(note,''), created_at, updated_at
-		 FROM teacher_capability WHERE teacher_id = ? ORDER BY id ASC`, teacherID)
+		 FROM teacher_capability WHERE teacher_id = ? ORDER BY id ASC LIMIT ? OFFSET ?`, teacherID, limit, offset)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer rows.Close()
-	var out []Capability
+	out := []Capability{}
 	for rows.Next() {
 		var c Capability
 		var tags, note string
 		var verified int
 		if err := rows.Scan(&c.ID, &c.TeacherID, &c.DomainID, &c.TrackID, &c.LevelID, &tags, &c.Status, &verified, &c.EffectiveFrom, &c.EffectiveTo, &note, &c.CreatedAt, &c.UpdatedAt); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		c.SkillTagCodes = tags
 		c.Verified = verified != 0
 		c.Note = note
 		out = append(out, c)
 	}
-	return out, rows.Err()
+	return out, total, rows.Err()
 }
 
 // GetCapability returns a capability by id scoped to a teacher.
@@ -758,25 +766,29 @@ func buildCapabilitySets(w CapabilityWrite) ([]string, []any) {
 // ---------- Availability ----------
 
 // ListAvailability returns availability slots for a teacher.
-func (r *Repository) ListAvailability(ctx context.Context, exec repository.Executor, teacherID int64) ([]Availability, error) {
+func (r *Repository) ListAvailability(ctx context.Context, exec repository.Executor, teacherID int64, limit, offset int) ([]Availability, int, error) {
+	var total int
+	if err := exec.QueryRowContext(ctx, `SELECT COUNT(*) FROM teacher_availability WHERE teacher_id = ?`, teacherID).Scan(&total); err != nil {
+		return nil, 0, err
+	}
 	rows, err := exec.QueryContext(ctx,
 		`SELECT id, teacher_id, weekday, start_time, end_time, effective_from, effective_to, COALESCE(note,''), created_at, updated_at
-		 FROM teacher_availability WHERE teacher_id = ? ORDER BY weekday ASC, start_time ASC`, teacherID)
+		 FROM teacher_availability WHERE teacher_id = ? ORDER BY weekday ASC, start_time ASC LIMIT ? OFFSET ?`, teacherID, limit, offset)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer rows.Close()
-	var out []Availability
+	out := []Availability{}
 	for rows.Next() {
 		var a Availability
 		var note string
 		if err := rows.Scan(&a.ID, &a.TeacherID, &a.Weekday, &a.StartTime, &a.EndTime, &a.EffectiveFrom, &a.EffectiveTo, &note, &a.CreatedAt, &a.UpdatedAt); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		a.Note = note
 		out = append(out, a)
 	}
-	return out, rows.Err()
+	return out, total, rows.Err()
 }
 
 // GetAvailability returns an availability slot by id scoped to a teacher.

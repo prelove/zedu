@@ -252,8 +252,9 @@ func (h *Handler) listEnrollments(w http.ResponseWriter, r *http.Request) {
 		httpserver.WriteErrorFromContext(w, r, http.StatusNotFound, httpserver.CodeNotFound, "NOT_FOUND")
 		return
 	}
-	items, err := h.svc.ListEnrollments(r.Context(), user, studentID)
-	h.respond(w, r, items, err)
+	pq := httpserver.ParsePage(r)
+	data, err := h.svc.ListEnrollments(r.Context(), user, studentID, pq.Page, pq.PageSize)
+	h.respond(w, r, data, err)
 }
 
 func (h *Handler) createEnrollment(w http.ResponseWriter, r *http.Request) {
@@ -316,8 +317,9 @@ func (h *Handler) listAssignments(w http.ResponseWriter, r *http.Request) {
 		httpserver.WriteErrorFromContext(w, r, http.StatusNotFound, httpserver.CodeNotFound, "NOT_FOUND")
 		return
 	}
-	items, err := h.svc.ListAssignments(r.Context(), user, enrollmentID)
-	h.respond(w, r, items, err)
+	pq := httpserver.ParsePage(r)
+	data, err := h.svc.ListAssignments(r.Context(), user, enrollmentID, pq.Page, pq.PageSize)
+	h.respond(w, r, data, err)
 }
 
 func (h *Handler) createAssignment(w http.ResponseWriter, r *http.Request) {

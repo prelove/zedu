@@ -401,7 +401,7 @@ func TestCreateParentAndCrossStudent40401(t *testing.T) {
 	}
 	// Original parent name unchanged.
 	_, gb := req(t, "GET", fmt.Sprintf("%s/students/%d/parents", ts.srv.URL, studentA), tok, nil)
-	items := gb["data"].([]any)
+	items := dataMap(t, gb)["items"].([]any)
 	if items[0].(map[string]any)["name"] != "P1" {
 		t.Fatalf("parent name was changed by cross-student attempt: %v", items[0])
 	}
@@ -416,7 +416,7 @@ func TestMultipleParentsForStudent(t *testing.T) {
 	req(t, "POST", fmt.Sprintf("%s/students/%d/parents", ts.srv.URL, studentID), tok, map[string]any{"name": "Dad", "relationship": "FATHER"})
 	req(t, "POST", fmt.Sprintf("%s/students/%d/parents", ts.srv.URL, studentID), tok, map[string]any{"name": "Mom", "relationship": "MOTHER"})
 	_, body := req(t, "GET", fmt.Sprintf("%s/students/%d/parents", ts.srv.URL, studentID), tok, nil)
-	items := body["data"].([]any)
+	items := dataMap(t, body)["items"].([]any)
 	if len(items) != 2 {
 		t.Fatalf("expected 2 parents, got %d", len(items))
 	}

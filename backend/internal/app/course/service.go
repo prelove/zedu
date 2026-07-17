@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/prelove/zedu/backend/internal/platform/httpserver"
 	"github.com/prelove/zedu/backend/internal/repository"
@@ -115,6 +116,11 @@ func validateDomainWrite(w DomainWrite, isCreate bool) error {
 		if w.Code == nil || strings.TrimSpace(*w.Code) == "" {
 			return ErrInvalidState
 		}
+	} else {
+		// P2-2: an empty PATCH body is not a valid write.
+		if w == (DomainWrite{}) {
+			return ErrInvalidState
+		}
 	}
 	if w.Name != nil && strings.TrimSpace(*w.Name) == "" {
 		return ErrInvalidState
@@ -180,6 +186,20 @@ func (s *Service) UpdateTrack(ctx context.Context, u httpserver.AuthUser, id int
 		if _, err := s.repo.GetDomain(ctx, tx, domainID); err != nil {
 			return err
 		}
+		// P1-3: reparenting a track that is referenced by capabilities or
+		// enrollments would orphan those references; reject 42201.
+		if w.DomainID != nil && *w.DomainID != existing.DomainID {
+			if n, err := s.repo.CountCapabilitiesByTrack(ctx, tx, id); err != nil {
+				return err
+			} else if n > 0 {
+				return ErrInvalidState
+			}
+			if n, err := s.repo.CountEnrollmentsByTrack(ctx, tx, id); err != nil {
+				return err
+			} else if n > 0 {
+				return ErrInvalidState
+			}
+		}
 		if err := s.repo.UpdateTrack(ctx, tx, id, w); err != nil {
 			return err
 		}
@@ -216,6 +236,11 @@ func validateTrackWrite(w TrackWrite, isCreate bool) error {
 			return ErrInvalidState
 		}
 		if w.Code == nil || strings.TrimSpace(*w.Code) == "" {
+			return ErrInvalidState
+		}
+	} else {
+		// P2-2: an empty PATCH body is not a valid write.
+		if w == (TrackWrite{}) {
 			return ErrInvalidState
 		}
 	}
@@ -282,6 +307,20 @@ func (s *Service) UpdateLevel(ctx context.Context, u httpserver.AuthUser, id int
 		if w.TrackID != nil {
 			trackID = *w.TrackID
 		}
+		// P1-3: reparenting a level that is referenced by capabilities or
+		// enrollments would orphan those references; reject 42201.
+		if w.TrackID != nil && *w.TrackID != existing.TrackID {
+			if n, err := s.repo.CountCapabilitiesByLevel(ctx, tx, id); err != nil {
+				return err
+			} else if n > 0 {
+				return ErrInvalidState
+			}
+			if n, err := s.repo.CountEnrollmentsByLevel(ctx, tx, id); err != nil {
+				return err
+			} else if n > 0 {
+				return ErrInvalidState
+			}
+		}
 		// Verify hierarchy: track exists and its domain exists.
 		track, err := s.repo.GetTrack(ctx, tx, trackID)
 		if err != nil {
@@ -326,6 +365,11 @@ func validateLevelWrite(w LevelWrite, isCreate bool) error {
 			return ErrInvalidState
 		}
 		if w.Code == nil || strings.TrimSpace(*w.Code) == "" {
+			return ErrInvalidState
+		}
+	} else {
+		// P2-2: an empty PATCH body is not a valid write.
+		if w == (LevelWrite{}) {
 			return ErrInvalidState
 		}
 	}
@@ -443,16 +487,26 @@ func validateTagWrite(w TagWrite, isCreate bool) error {
 
 // ---------- shared helpers ----------
 
+// inTx runs fn inside a single database transaction. If the business function
+// returns a validation/conflict error but Rollback itself fails, the final
+// error is ErrDatabase (50002) — not the original error — because the
+// transaction state is indeterminate. BeginTx and Commit failures also return
+// ErrDatabase.
 func (s *Service) inTx(ctx context.Context, fn func(repository.Tx) error) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return repository.ErrDatabase
 	}
 	if err := fn(tx); err != nil {
-		_ = tx.Rollback()
+		if rbErr := tx.Rollback(); rbErr != nil {
+			return repository.ErrDatabase
+		}
 		return err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return repository.ErrDatabase
+	}
+	return nil
 }
 
 // audit writes the operation_log row inside the current transaction.
@@ -523,7 +577,11 @@ func (s *Service) CreateEnrollment(ctx context.Context, u httpserver.AuthUser, s
 	return created, nil
 }
 
-// UpdateEnrollment patches an enrollment's status with state-machine validation.
+// UpdateEnrollment patches an enrollment. The student must still be ACTIVE
+// (P1-2). A currentLevelId change does NOT overwrite the enrollment's
+// current_level_id; instead a student_level_event row is written in the same
+// transaction (P1-4). Course-selection changes (domain/track/target level) do
+// update the enrollment and are audited with before/after snapshots.
 func (s *Service) UpdateEnrollment(ctx context.Context, u httpserver.AuthUser, id int64, w EnrollmentWrite, requestID string) (Enrollment, error) {
 	a := fromUser(u)
 	if err := a.authorize(); err != nil {
@@ -532,10 +590,18 @@ func (s *Service) UpdateEnrollment(ctx context.Context, u httpserver.AuthUser, i
 	if err := validateEnrollmentWrite(w, false); err != nil {
 		return Enrollment{}, err
 	}
+	// P2-2: an empty PATCH body is not a valid write.
+	if w == (EnrollmentWrite{}) {
+		return Enrollment{}, ErrInvalidState
+	}
 	var updated Enrollment
 	err := s.inTx(ctx, func(tx repository.Tx) error {
 		existing, err := s.repo.GetEnrollment(ctx, tx, id)
 		if err != nil {
+			return err
+		}
+		// P1-2: the student must still be ACTIVE to mutate the enrollment.
+		if _, err := s.repo.GetStudentActive(ctx, tx, existing.StudentID); err != nil {
 			return err
 		}
 		if w.Status != nil && *w.Status != existing.Status {
@@ -544,8 +610,33 @@ func (s *Service) UpdateEnrollment(ctx context.Context, u httpserver.AuthUser, i
 				return ErrInvalidState
 			}
 		}
-		// If hierarchy fields change, re-verify.
-		if w.DomainID != nil || w.TrackID != nil || w.CurrentLevelID != nil || w.TargetLevelID != nil {
+		// P1-4: a currentLevelId change writes a level event but does NOT
+		// overwrite the enrollment's current_level_id.
+		var levelEventFrom, levelEventTo *int64
+		if w.CurrentLevelID != nil {
+			levelEventTo = w.CurrentLevelID
+			levelEventFrom = existing.CurrentLevelID
+			// Verify the new level belongs to the (possibly new) track.
+			hw := EnrollmentWrite{
+				DomainID:       w.DomainID,
+				TrackID:        w.TrackID,
+				CurrentLevelID: w.CurrentLevelID,
+				TargetLevelID:  w.TargetLevelID,
+			}
+			if hw.DomainID == nil {
+				hw.DomainID = &existing.DomainID
+			}
+			if hw.TrackID == nil {
+				hw.TrackID = &existing.TrackID
+			}
+			if hw.TargetLevelID == nil {
+				hw.TargetLevelID = existing.TargetLevelID
+			}
+			if err := s.verifyEnrollmentHierarchy(ctx, tx, hw); err != nil {
+				return err
+			}
+		} else if w.DomainID != nil || w.TrackID != nil || w.TargetLevelID != nil {
+			// If hierarchy fields change, re-verify.
 			hw := EnrollmentWrite{
 				DomainID:       w.DomainID,
 				TrackID:        w.TrackID,
@@ -568,14 +659,43 @@ func (s *Service) UpdateEnrollment(ctx context.Context, u httpserver.AuthUser, i
 				return err
 			}
 		}
-		if err := s.repo.UpdateEnrollment(ctx, tx, id, w); err != nil {
+		// Build the persisted patch: strip currentLevelId so the enrollment's
+		// current_level_id is NOT overwritten by a level-change request.
+		persist := w
+		persist.CurrentLevelID = nil
+		if err := s.repo.UpdateEnrollment(ctx, tx, id, persist); err != nil {
 			return err
+		}
+		// P1-4: write the level event inside the same transaction.
+		if levelEventTo != nil {
+			if err := s.repo.InsertLevelEvent(ctx, tx, existing.StudentID, id, levelEventFrom, levelEventTo, "MANUAL", time.Now().UTC().Format("2006-01-02"), a.id); err != nil {
+				return err
+			}
 		}
 		updated, err = s.repo.GetEnrollment(ctx, tx, id)
 		if err != nil {
 			return err
 		}
-		return s.audit(ctx, tx, a.id, "ENROLLMENT_UPDATE", "enrollment", id, map[string]any{"status": updated.Status}, requestID)
+		// P1-4: audit with before/after snapshots for course-selection changes.
+		detail := map[string]any{}
+		if levelEventTo != nil {
+			detail["levelEvent"] = map[string]any{"from": ptrInt64(levelEventFrom), "to": *levelEventTo}
+		}
+		if w.DomainID != nil || w.TrackID != nil || w.TargetLevelID != nil || w.Status != nil || w.Note != nil {
+			detail["before"] = map[string]any{
+				"domainId":      existing.DomainID,
+				"trackId":       existing.TrackID,
+				"targetLevelId": existing.TargetLevelID,
+				"status":        existing.Status,
+			}
+			detail["after"] = map[string]any{
+				"domainId":      updated.DomainID,
+				"trackId":       updated.TrackID,
+				"targetLevelId": updated.TargetLevelID,
+				"status":        updated.Status,
+			}
+		}
+		return s.audit(ctx, tx, a.id, "ENROLLMENT_UPDATE", "enrollment", id, detail, requestID)
 	})
 	if err != nil {
 		return Enrollment{}, err
@@ -592,13 +712,17 @@ func (s *Service) GetEnrollment(ctx context.Context, u httpserver.AuthUser, id i
 	return s.repo.GetEnrollment(ctx, s.db, id)
 }
 
-// ListEnrollments returns enrollments for a student.
-func (s *Service) ListEnrollments(ctx context.Context, u httpserver.AuthUser, studentID int64) ([]Enrollment, error) {
+// ListEnrollments returns a page of enrollments for a student.
+func (s *Service) ListEnrollments(ctx context.Context, u httpserver.AuthUser, studentID int64, page, pageSize int) (httpserver.ListData, error) {
 	a := fromUser(u)
 	if err := a.authorize(); err != nil {
-		return nil, err
+		return httpserver.ListData{}, err
 	}
-	return s.repo.ListEnrollments(ctx, s.db, studentID)
+	items, total, err := s.repo.ListEnrollments(ctx, s.db, studentID, pageSize, (page-1)*pageSize)
+	if err != nil {
+		return httpserver.ListData{}, err
+	}
+	return httpserver.NewListData(items, total, httpserver.PageQuery{Page: page, PageSize: pageSize}), nil
 }
 
 func validateEnrollmentWrite(w EnrollmentWrite, isCreate bool) error {
@@ -606,6 +730,20 @@ func validateEnrollmentWrite(w EnrollmentWrite, isCreate bool) error {
 		if w.DomainID == nil || w.TrackID == nil {
 			return ErrInvalidState
 		}
+	}
+	// P1-5: reject non-positive level IDs at the service layer so they never
+	// reach the database (which would surface as 50002).
+	if w.CurrentLevelID != nil && *w.CurrentLevelID <= 0 {
+		return ErrInvalidState
+	}
+	if w.TargetLevelID != nil && *w.TargetLevelID <= 0 {
+		return ErrInvalidState
+	}
+	if w.DomainID != nil && *w.DomainID <= 0 {
+		return ErrInvalidState
+	}
+	if w.TrackID != nil && *w.TrackID <= 0 {
+		return ErrInvalidState
 	}
 	if w.EnrollmentType != nil && *w.EnrollmentType != "" && !validEnrollmentTypes[*w.EnrollmentType] {
 		return ErrInvalidState
@@ -663,12 +801,20 @@ func (s *Service) verifyEnrollmentHierarchy(ctx context.Context, tx repository.T
 // ACTIVE assignment; the end-before-insert within one tx means the insert never
 // races a leftover ACTIVE. M2 creates no lesson, attendance, payment,
 // notification, payout or email records.
+// validAssignmentRoleTypes mirrors migration 003 CHECK constraint.
+var validAssignmentRoleTypes = map[string]bool{"MAIN": true, "SUBSTITUTE": true, "ASSISTANT": true}
+
 func (s *Service) CreateAssignment(ctx context.Context, u httpserver.AuthUser, enrollmentID int64, w AssignmentWrite, requestID string) (Assignment, error) {
 	a := fromUser(u)
 	if err := a.authorize(); err != nil {
 		return Assignment{}, err
 	}
 	if w.TeacherID == nil || *w.TeacherID <= 0 {
+		return Assignment{}, ErrInvalidState
+	}
+	// P1-5: reject non-enum roleType at the service layer so it never reaches
+	// the database (which would surface as 50002).
+	if w.RoleType != nil && *w.RoleType != "" && !validAssignmentRoleTypes[*w.RoleType] {
 		return Assignment{}, ErrInvalidState
 	}
 	var created Assignment
@@ -752,16 +898,20 @@ func (s *Service) EndAssignment(ctx context.Context, u httpserver.AuthUser, id i
 	return ended, nil
 }
 
-// ListAssignments returns assignments for an enrollment.
-func (s *Service) ListAssignments(ctx context.Context, u httpserver.AuthUser, enrollmentID int64) ([]Assignment, error) {
+// ListAssignments returns a page of assignments for an enrollment.
+func (s *Service) ListAssignments(ctx context.Context, u httpserver.AuthUser, enrollmentID int64, page, pageSize int) (httpserver.ListData, error) {
 	a := fromUser(u)
 	if err := a.authorize(); err != nil {
-		return nil, err
+		return httpserver.ListData{}, err
 	}
 	if _, err := s.repo.GetEnrollment(ctx, s.db, enrollmentID); err != nil {
-		return nil, err
+		return httpserver.ListData{}, err
 	}
-	return s.repo.ListAssignments(ctx, s.db, enrollmentID)
+	items, total, err := s.repo.ListAssignments(ctx, s.db, enrollmentID, pageSize, (page-1)*pageSize)
+	if err != nil {
+		return httpserver.ListData{}, err
+	}
+	return httpserver.NewListData(items, total, httpserver.PageQuery{Page: page, PageSize: pageSize}), nil
 }
 
 // ---------- helpers ----------

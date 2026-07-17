@@ -13,7 +13,15 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
 )
+
+// ErrDatabase is the sentinel returned when a database operation (BeginTx,
+// Commit, or Rollback) fails inside a service transaction. Application
+// services map this to HTTP 500 / 50002. It is distinct from validation or
+// conflict errors so that a Rollback failure after a validation error still
+// surfaces as 50002, not the original 42201/40901.
+var ErrDatabase = errors.New("database error")
 
 // Executor is the minimal read/write interface satisfied by both *sql.DB and
 // *sql.Tx. Repository methods accept Executor so the same code path runs

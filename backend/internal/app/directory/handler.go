@@ -120,8 +120,9 @@ func (h *Handler) listParents(w http.ResponseWriter, r *http.Request) {
 		httpserver.WriteErrorFromContext(w, r, http.StatusNotFound, httpserver.CodeNotFound, "NOT_FOUND")
 		return
 	}
-	parents, err := h.svc.ListParents(r.Context(), user, studentID)
-	h.respond(w, r, parents, err)
+	pq := httpserver.ParsePage(r)
+	data, err := h.svc.ListParents(r.Context(), user, studentID, pq.Page, pq.PageSize)
+	h.respond(w, r, data, err)
 }
 
 func (h *Handler) createParent(w http.ResponseWriter, r *http.Request) {
@@ -235,8 +236,9 @@ func (h *Handler) listCapabilities(w http.ResponseWriter, r *http.Request) {
 		httpserver.WriteErrorFromContext(w, r, http.StatusNotFound, httpserver.CodeNotFound, "NOT_FOUND")
 		return
 	}
-	caps, err := h.svc.ListCapabilities(r.Context(), user, teacherID)
-	h.respond(w, r, caps, err)
+	pq := httpserver.ParsePage(r)
+	data, err := h.svc.ListCapabilities(r.Context(), user, teacherID, pq.Page, pq.PageSize)
+	h.respond(w, r, data, err)
 }
 
 func (h *Handler) createCapability(w http.ResponseWriter, r *http.Request) {
@@ -293,8 +295,9 @@ func (h *Handler) listAvailability(w http.ResponseWriter, r *http.Request) {
 		httpserver.WriteErrorFromContext(w, r, http.StatusNotFound, httpserver.CodeNotFound, "NOT_FOUND")
 		return
 	}
-	avails, err := h.svc.ListAvailability(r.Context(), user, teacherID)
-	h.respond(w, r, avails, err)
+	pq := httpserver.ParsePage(r)
+	data, err := h.svc.ListAvailability(r.Context(), user, teacherID, pq.Page, pq.PageSize)
+	h.respond(w, r, data, err)
 }
 
 func (h *Handler) createAvailability(w http.ResponseWriter, r *http.Request) {
