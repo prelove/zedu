@@ -39,4 +39,5 @@
 - M2-GLM-01（认证/RBAC/M2 基础迁移）：ACCEPTED；PR #2 已于 2026-07-16 合并至 `main`。Windows 与 Ubuntu CI 全绿，Ubuntu 已通过 `go test ./... -race -count=1`；独立验收证据见 `docs/acceptance/evidence/M2/GLM-01.md`。
 - M2-GLM-02A（显式初始化与受限重置）：ACCEPTED；`3bc4078` 已合并 `main`，Windows/Ubuntu CI 与 Linux race 全绿，证据见 `docs/acceptance/evidence/M2/GLM-02A.md`。
 - M2-GLM-02B/02C（人员资料、课程、报名与安排 API）：ACCEPTED。复验已覆盖分页、ACTIVE 学生约束、字典引用完整性、等级历史、错误/事务语义；额外收口了连续等级事件链、课程选择与等级变更的互斥写入、等级事件引用保护及 PRD 等级事件枚举。证据见 `docs/acceptance/evidence/M2/GLM-02BC.md`。新领域保持 `HTTP → application → repository` 分层，不回溯重构已验收认证/初始化。
-- M2-KIMI-01 仍为 READY（认证前端）；M2-KIMI-02 仅等待 M2-KIMI-01 ACCEPTED，M2-CODEX-02 等两项前端工作及浏览器集成验收。
+- M2-KIMI-01 为当前 READY 关键路径：认证前端、受保护路由与 Owner 初始化界面，工单见 `docs/tasks/M2/M2-KIMI-01-frontend-auth-onboarding.md`。
+- M2-KIMI-02 仅等待 M2-KIMI-01 ACCEPTED；M2-CODEX-02 等两项前端工作及浏览器集成验收。
