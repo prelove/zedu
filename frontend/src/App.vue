@@ -2,6 +2,7 @@
 import { onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { authStore } from './stores/auth'
+import LocaleSwitcher from './components/LocaleSwitcher.vue'
 
 const { t } = useI18n()
 
@@ -20,6 +21,7 @@ onMounted(() => {
   >
     <header class="app-header">
       <h1>{{ t('app.name') }}</h1>
+      <LocaleSwitcher />
     </header>
     <main class="app-main">
       <RouterView />

@@ -47,7 +47,7 @@ router.beforeEach((to) => {
   }
 
   if (to.meta.requiresOwner && !authStore.isOwner.value) {
-    return { name: 'home' }
+    return { name: 'home', query: { denied: 'owner' } }
   }
 
   return true

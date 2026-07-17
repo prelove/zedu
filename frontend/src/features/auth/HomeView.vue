@@ -1,15 +1,16 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { authStore } from '../../stores/auth'
-import LocaleSwitcher from '../../components/LocaleSwitcher.vue'
 
 const router = useRouter()
+const route = useRoute()
 const { t } = useI18n()
 
 const logoutError = ref(false)
 const loggingOut = ref(false)
+const ownerAccessDenied = computed(() => route.query.denied === 'owner')
 
 async function handleLogout(): Promise<void> {
   loggingOut.value = true
@@ -53,7 +54,6 @@ function roleLabel(role: string | null): string {
         </p>
       </div>
       <div class="home-controls">
-        <LocaleSwitcher />
         <button
           type="button"
           :disabled="loggingOut"
@@ -64,6 +64,15 @@ function roleLabel(role: string | null): string {
         </button>
       </div>
     </header>
+    <p
+      v-if="ownerAccessDenied"
+      class="logout-error"
+      role="alert"
+      aria-live="assertive"
+      data-testid="home-owner-required"
+    >
+      {{ t('routeGuard.ownerRequired') }}
+    </p>
     <p
       v-if="logoutError"
       class="logout-error"

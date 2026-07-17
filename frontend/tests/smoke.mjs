@@ -13,18 +13,45 @@
  *   8. /auth/logout → session revoked
  *   9. Login failure → 40102
  *
- * Run: node tests/smoke.mjs
- * Requires: backend on :8080, frontend dev server on :5173
+ * This script performs state-changing initialization/reset requests. It is
+ * intentionally disabled unless pointed at a disposable environment.
+ *
+ * Run (PowerShell):
+ *   $env:ZEDU_SMOKE_BASE_URL='http://localhost:5173'
+ *   $env:ZEDU_SMOKE_OWNER_USERNAME='smoke-owner'
+ *   $env:ZEDU_SMOKE_OWNER_PASSWORD='<disposable-password>'
+ *   $env:ZEDU_SMOKE_OPERATOR_USERNAME='smoke-operator'
+ *   $env:ZEDU_SMOKE_OPERATOR_PASSWORD='<disposable-password>'
+ *   $env:ZEDU_SMOKE_ALLOW_MUTATION='1'
+ *   node tests/smoke.mjs
+ *
+ * Never point it at a shared or production database.
  */
 
-const PROXY = 'http://localhost:5173'
+const PROXY = process.env.ZEDU_SMOKE_BASE_URL
+const OWNER_USERNAME = process.env.ZEDU_SMOKE_OWNER_USERNAME
+const OWNER_PASSWORD = process.env.ZEDU_SMOKE_OWNER_PASSWORD
+const OPERATOR_USERNAME = process.env.ZEDU_SMOKE_OPERATOR_USERNAME
+const OPERATOR_PASSWORD = process.env.ZEDU_SMOKE_OPERATOR_PASSWORD
+
+if (
+  !PROXY ||
+  !OWNER_USERNAME ||
+  !OWNER_PASSWORD ||
+  !OPERATOR_USERNAME ||
+  !OPERATOR_PASSWORD ||
+  process.env.ZEDU_SMOKE_ALLOW_MUTATION !== '1'
+) {
+  console.error('Refusing to run mutable smoke test without disposable-environment variables and ZEDU_SMOKE_ALLOW_MUTATION=1.')
+  process.exit(2)
+}
 
 function assert(condition, message) {
   if (!condition) {
     console.error(`FAIL: ${message}`)
     process.exit(1)
   }
-  console.log(`PASS: ${message}`)
+  console.warn(`PASS: ${message}`)
 }
 
 /** Manual cookie jar — Node fetch doesn't auto-manage cookies like a browser. */
@@ -65,22 +92,22 @@ async function main() {
   // 1. Login success.
   const loginRes = await jsonFetch(`${PROXY}/auth/login`, {
     method: 'POST',
-    body: { username: 'smoke-owner', password: 'smoke-test-pass-123' },
+    body: { username: OWNER_USERNAME, password: OWNER_PASSWORD },
   })
   assert(loginRes.status === 200, `login returns 200 (got ${loginRes.status})`)
   assert(loginRes.body.code === 0, 'login returns code 0')
   assert(typeof loginRes.body.data?.accessToken === 'string', 'login returns accessToken')
   assert(loginRes.body.data?.role === 'OWNER', 'login returns role OWNER')
   const token = loginRes.body.data.accessToken
-  console.log(`  token length: ${token.length}`)
-  console.log(`  cookie jar: ${cookieJar ? '(set)' : '(empty)'}`)
+  console.warn(`  token length: ${token.length}`)
+  console.warn(`  cookie jar: ${cookieJar ? '(set)' : '(empty)'}`)
 
   // 2. /auth/me with token.
   const meRes = await jsonFetch(`${PROXY}/auth/me`, {
     headers: { Authorization: `Bearer ${token}` },
   })
   assert(meRes.status === 200, `me returns 200 (got ${meRes.status})`)
-  assert(meRes.body.data?.username === 'smoke-owner', 'me returns correct username')
+  assert(meRes.body.data?.username === OWNER_USERNAME, 'me returns correct username')
 
   // 3. Unauthenticated /auth/me → 40101.
   const savedCookie = cookieJar
@@ -99,7 +126,7 @@ async function main() {
   assert(initRes.status === 200, `initialize returns 200 (got ${initRes.status})`)
   assert(initRes.body.code === 0, 'initialize returns code 0')
   assert(initRes.body.data?.template === 'japanese', 'initialize returns template japanese')
-  console.log(`  reused: ${initRes.body.data?.reused}`)
+  console.warn(`  reused: ${initRes.body.data?.reused}`)
 
   // 5. Owner repeat initialize → reused=true.
   const initRepeatRes = await jsonFetch(`${PROXY}/onboarding/initialize`, {
@@ -116,7 +143,7 @@ async function main() {
   cookieJar = ''
   const opLoginRes = await jsonFetch(`${PROXY}/auth/login`, {
     method: 'POST',
-    body: { username: 'smoke-operator', password: 'smoke-test-pass-123' },
+    body: { username: OPERATOR_USERNAME, password: OPERATOR_PASSWORD },
   })
   const opToken = opLoginRes.body.data?.accessToken
   const opInitRes = await jsonFetch(`${PROXY}/onboarding/initialize`, {
@@ -137,7 +164,7 @@ async function main() {
   // 7. Login failure → 40102.
   const failRes = await jsonFetch(`${PROXY}/auth/login`, {
     method: 'POST',
-    body: { username: 'smoke-owner', password: 'wrong-password' },
+    body: { username: OWNER_USERNAME, password: 'wrong-password' },
   })
   assert(failRes.status === 401, `failed login returns 401 (got ${failRes.status})`)
   assert(failRes.body.code === 40102, `failed login returns 40102 (got ${failRes.body.code})`)
@@ -173,7 +200,7 @@ async function main() {
   cookieJar = ''
   const reLoginRes = await jsonFetch(`${PROXY}/auth/login`, {
     method: 'POST',
-    body: { username: 'smoke-owner', password: 'smoke-test-pass-123' },
+    body: { username: OWNER_USERNAME, password: OWNER_PASSWORD },
   })
   const reToken = reLoginRes.body.data?.accessToken
   const resetRes = await jsonFetch(`${PROXY}/onboarding/reset`, {
@@ -185,7 +212,7 @@ async function main() {
   assert(resetRes.body.code === 0, 'reset returns code 0')
   assert(resetRes.body.data?.template === 'blank', 'reset returns template blank')
 
-  console.log('\n=== ALL SMOKE TESTS PASSED ===')
+  console.warn('\n=== ALL SMOKE TESTS PASSED ===')
 }
 
 main().catch((err) => {

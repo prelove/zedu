@@ -39,8 +39,8 @@ function createTestRouter(): Router {
     if (to.meta.public && isAuthenticated) {
       return { name: 'home' }
     }
-    if (to.meta.requiresOwner && !authStore.isOwner.value) {
-      return { name: 'home' }
+  if (to.meta.requiresOwner && !authStore.isOwner.value) {
+      return { name: 'home', query: { denied: 'owner' } }
     }
     return true
   })
@@ -111,6 +111,7 @@ describe('router guard', () => {
     await router.push('/onboarding')
     await router.isReady()
     expect(router.currentRoute.value.name).toBe('home')
+    expect(router.currentRoute.value.query.denied).toBe('owner')
   })
 
   it('login redirect preserves the original target path', async () => {

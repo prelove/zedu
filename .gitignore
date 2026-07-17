@@ -16,6 +16,7 @@ frontend/dist/
 backend/bin/
 coverage/
 frontend/coverage/
+.playwright-cli/
 
 # Local agent runtime (plans/specs remain tracked separately by policy)
 .omx/logs/
