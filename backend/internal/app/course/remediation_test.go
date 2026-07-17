@@ -233,7 +233,51 @@ func TestLevelChangeWritesEventAndPreservesEnrollmentLevel(t *testing.T) {
 	}
 }
 
-func TestCourseSelectionChangeAuditContainsBeforeAfter(t *testing.T) {
+func TestSequentialLevelChangesFollowTheLatestRecordedLevel(t *testing.T) {
+	ts := newTestServer(t)
+	tok := ownerToken(t, ts)
+	studentID, domainID, trackID, levelN5 := seedStudentAndCourse(t, ts)
+	enrollmentID := createEnrollment(t, ts, tok, studentID, domainID, trackID, levelN5)
+	_, n4Body := req(t, "POST", ts.srv.URL+"/levels", tok, map[string]any{"trackId": trackID, "name": "N4", "code": "N4"})
+	levelN4 := int64(dataMap(t, n4Body)["id"].(float64))
+	_, n3Body := req(t, "POST", ts.srv.URL+"/levels", tok, map[string]any{"trackId": trackID, "name": "N3", "code": "N3"})
+	levelN3 := int64(dataMap(t, n3Body)["id"].(float64))
+	for _, levelID := range []int64{levelN4, levelN3} {
+		status, body := req(t, "PATCH", fmt.Sprintf("%s/enrollments/%d", ts.srv.URL, enrollmentID), tok, map[string]any{"currentLevelId": levelID})
+		if status != http.StatusOK {
+			t.Fatalf("level change to %d: expected 200, got %d body=%v", levelID, status, body)
+		}
+	}
+	rows, err := ts.db.Query(`SELECT from_level_id, to_level_id FROM student_level_event WHERE enrollment_id = ? ORDER BY id`, enrollmentID)
+	if err != nil {
+		t.Fatalf("query level events: %v", err)
+	}
+	defer rows.Close()
+	var events [][2]int64
+	for rows.Next() {
+		var from, to int64
+		if err := rows.Scan(&from, &to); err != nil {
+			t.Fatalf("scan level event: %v", err)
+		}
+		events = append(events, [2]int64{from, to})
+	}
+	if len(events) != 2 || events[0] != [2]int64{levelN5, levelN4} || events[1] != [2]int64{levelN4, levelN3} {
+		t.Fatalf("expected chronological transitions N5->N4 and N4->N3, got %v", events)
+	}
+	status, body := req(t, "PATCH", fmt.Sprintf("%s/enrollments/%d", ts.srv.URL, enrollmentID), tok, map[string]any{"currentLevelId": levelN3})
+	if status != http.StatusUnprocessableEntity || codeOf(t, body) != float64(httpserver.CodeInvalidState) {
+		t.Fatalf("same effective level must be rejected as a no-op: got %d %v", status, body)
+	}
+	var count int
+	if err := ts.db.QueryRow(`SELECT COUNT(*) FROM student_level_event WHERE enrollment_id = ?`, enrollmentID).Scan(&count); err != nil {
+		t.Fatalf("count level events: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("same effective level must not create an event, got %d", count)
+	}
+}
+
+func TestCourseSelectionAndLevelChangeAreRejectedTogether(t *testing.T) {
 	ts := newTestServer(t)
 	tok := ownerToken(t, ts)
 	studentID, domainID, trackID, levelID := seedStudentAndCourse(t, ts)
@@ -250,17 +294,73 @@ func TestCourseSelectionChangeAuditContainsBeforeAfter(t *testing.T) {
 	// PATCH domain, track, and currentLevelId — audit must include before/after.
 	patchStatus, patchBody := req(t, "PATCH", fmt.Sprintf("%s/enrollments/%d", ts.srv.URL, enrID), tok,
 		map[string]any{"domainId": newDomainID, "trackId": newTrackID, "currentLevelId": newLevelID})
-	if patchStatus != http.StatusOK {
-		t.Fatalf("PATCH enrollment failed: status=%d body=%v", patchStatus, patchBody)
+	if patchStatus != http.StatusUnprocessableEntity || codeOf(t, patchBody) != float64(httpserver.CodeInvalidState) {
+		t.Fatalf("expected 422/42201 for incompatible composite patch, got %d %v", patchStatus, patchBody)
 	}
 
-	var detailJSON string
-	ts.db.QueryRow(`SELECT detail_json FROM operation_log WHERE action = 'ENROLLMENT_UPDATE' AND target_id = ? ORDER BY id DESC LIMIT 1`, enrID).Scan(&detailJSON)
-	if !strings.Contains(detailJSON, "before") {
-		t.Fatalf("audit detail missing 'before' snapshot: %s", detailJSON)
+	var persistedTrack int64
+	if err := ts.db.QueryRow(`SELECT track_id FROM student_course_enrollment WHERE id = ?`, enrID).Scan(&persistedTrack); err != nil {
+		t.Fatalf("read enrollment after rejection: %v", err)
 	}
-	if !strings.Contains(detailJSON, "after") {
-		t.Fatalf("audit detail missing 'after' snapshot: %s", detailJSON)
+	if persistedTrack != trackID {
+		t.Fatalf("rejected composite patch changed track: got %d want %d", persistedTrack, trackID)
+	}
+	var eventCount, auditCount int
+	ts.db.QueryRow(`SELECT COUNT(*) FROM student_level_event WHERE enrollment_id = ?`, enrID).Scan(&eventCount)
+	ts.db.QueryRow(`SELECT COUNT(*) FROM operation_log WHERE action = 'ENROLLMENT_UPDATE' AND target_id = ?`, enrID).Scan(&auditCount)
+	if eventCount != 0 || auditCount != 0 {
+		t.Fatalf("rejected composite patch created side effects: events=%d audit=%d", eventCount, auditCount)
+	}
+}
+
+func TestCourseSelectionChangeAuditsBeforeAndAfter(t *testing.T) {
+	ts := newTestServer(t)
+	tok := ownerToken(t, ts)
+	studentID, domainID, trackID, levelID := seedStudentAndCourse(t, ts)
+	enrollmentID := createEnrollment(t, ts, tok, studentID, domainID, trackID, levelID)
+	_, body := req(t, "POST", ts.srv.URL+"/levels", tok, map[string]any{"trackId": trackID, "name": "N4", "code": "N4"})
+	targetLevelID := int64(dataMap(t, body)["id"].(float64))
+	status, response := req(t, "PATCH", fmt.Sprintf("%s/enrollments/%d", ts.srv.URL, enrollmentID), tok, map[string]any{"targetLevelId": targetLevelID})
+	if status != http.StatusOK {
+		t.Fatalf("course selection update: expected 200, got %d %v", status, response)
+	}
+	var detail string
+	if err := ts.db.QueryRow(`SELECT detail_json FROM operation_log WHERE action = 'ENROLLMENT_UPDATE' AND target_id = ? ORDER BY id DESC LIMIT 1`, enrollmentID).Scan(&detail); err != nil {
+		t.Fatalf("read enrollment audit: %v", err)
+	}
+	if !strings.Contains(detail, "before") || !strings.Contains(detail, "after") {
+		t.Fatalf("course selection audit must contain before/after snapshots: %s", detail)
+	}
+}
+
+func TestLevelEventSchemaUsesPRDEventTypesAndProtectsEventReferencedLevels(t *testing.T) {
+	ts := newTestServer(t)
+	tok := ownerToken(t, ts)
+	studentID, domainID, trackID, levelN5 := seedStudentAndCourse(t, ts)
+	enrollmentID := createEnrollment(t, ts, tok, studentID, domainID, trackID, levelN5)
+	_, n4Body := req(t, "POST", ts.srv.URL+"/levels", tok, map[string]any{"trackId": trackID, "name": "N4", "code": "N4"})
+	levelN4 := int64(dataMap(t, n4Body)["id"].(float64))
+	if status, body := req(t, "PATCH", fmt.Sprintf("%s/enrollments/%d", ts.srv.URL, enrollmentID), tok, map[string]any{"currentLevelId": levelN4}); status != http.StatusOK {
+		t.Fatalf("create level event: got %d %v", status, body)
+	}
+	_, otherTrackBody := req(t, "POST", ts.srv.URL+"/tracks", tok, map[string]any{"domainId": domainID, "name": "Other", "code": "OTHER"})
+	otherTrackID := int64(dataMap(t, otherTrackBody)["id"].(float64))
+	status, body := req(t, "PATCH", fmt.Sprintf("%s/levels/%d", ts.srv.URL, levelN4), tok, map[string]any{"trackId": otherTrackID})
+	if status != http.StatusUnprocessableEntity || codeOf(t, body) != float64(httpserver.CodeInvalidState) {
+		t.Fatalf("event-referenced level must not be reparented: got %d %v", status, body)
+	}
+
+	var operatorID int64
+	if err := ts.db.QueryRow(`SELECT id FROM user_account WHERE username = 'owner'`).Scan(&operatorID); err != nil {
+		t.Fatalf("find owner: %v", err)
+	}
+	for _, eventType := range []string{"ASSESSMENT", "EXAM_PASS", "HOURS_REACHED", "AGE_REACHED", "MANUAL"} {
+		if _, err := ts.db.Exec(`INSERT INTO student_level_event (student_id, enrollment_id, to_level_id, event_type, event_date, operator_id) VALUES (?, ?, ?, ?, '2026-01-01', ?)`, studentID, enrollmentID, levelN4, eventType, operatorID); err != nil {
+			t.Fatalf("PRD event type %q rejected: %v", eventType, err)
+		}
+	}
+	if _, err := ts.db.Exec(`INSERT INTO student_level_event (student_id, enrollment_id, to_level_id, event_type, event_date, operator_id) VALUES (?, ?, ?, 'PROMOTION', '2026-01-01', ?)`, studentID, enrollmentID, levelN4, operatorID); err == nil {
+		t.Fatal("non-PRD event type PROMOTION was accepted")
 	}
 }
 

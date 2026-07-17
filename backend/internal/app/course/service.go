@@ -610,12 +610,27 @@ func (s *Service) UpdateEnrollment(ctx context.Context, u httpserver.AuthUser, i
 				return ErrInvalidState
 			}
 		}
+		// The level history is authoritative after the first transition. A level
+		// event does not overwrite the enrollment snapshot by design.
+		effectiveLevel, err := s.repo.EffectiveEnrollmentLevel(ctx, tx, id, existing.CurrentLevelID)
+		if err != nil {
+			return err
+		}
 		// P1-4: a currentLevelId change writes a level event but does NOT
 		// overwrite the enrollment's current_level_id.
 		var levelEventFrom, levelEventTo *int64
 		if w.CurrentLevelID != nil {
+			if (w.DomainID != nil && *w.DomainID != existing.DomainID) || (w.TrackID != nil && *w.TrackID != existing.TrackID) {
+				// Mixing a transition event with a course-selection move would retain
+				// the old snapshot level under a new track. Keep each write atomic and
+				// unambiguous instead of creating an internally inconsistent enrollment.
+				return ErrInvalidState
+			}
+			if effectiveLevel != nil && *effectiveLevel == *w.CurrentLevelID {
+				return ErrInvalidState
+			}
 			levelEventTo = w.CurrentLevelID
-			levelEventFrom = existing.CurrentLevelID
+			levelEventFrom = effectiveLevel
 			// Verify the new level belongs to the (possibly new) track.
 			hw := EnrollmentWrite{
 				DomainID:       w.DomainID,

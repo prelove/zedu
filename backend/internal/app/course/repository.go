@@ -1021,7 +1021,10 @@ func (r *Repository) CountCapabilitiesByTrack(ctx context.Context, exec reposito
 // referencing the given track.
 func (r *Repository) CountEnrollmentsByTrack(ctx context.Context, exec repository.Executor, trackID int64) (int, error) {
 	var n int
-	err := exec.QueryRowContext(ctx, `SELECT COUNT(*) FROM student_course_enrollment WHERE track_id = ? AND deleted_at IS NULL`, trackID).Scan(&n)
+	err := exec.QueryRowContext(ctx, `SELECT
+		(SELECT COUNT(*) FROM student_course_enrollment WHERE track_id = ? AND deleted_at IS NULL) +
+		(SELECT COUNT(*) FROM student_level_event e JOIN course_level l ON l.id = e.from_level_id WHERE l.track_id = ?) +
+		(SELECT COUNT(*) FROM student_level_event e JOIN course_level l ON l.id = e.to_level_id WHERE l.track_id = ?)`, trackID, trackID, trackID).Scan(&n)
 	return n, err
 }
 
@@ -1030,8 +1033,10 @@ func (r *Repository) CountEnrollmentsByTrack(ctx context.Context, exec repositor
 func (r *Repository) CountEnrollmentsByLevel(ctx context.Context, exec repository.Executor, levelID int64) (int, error) {
 	var n int
 	err := exec.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM student_course_enrollment
-		 WHERE (current_level_id = ? OR target_level_id = ?) AND deleted_at IS NULL`, levelID, levelID).Scan(&n)
+		`SELECT
+		 (SELECT COUNT(*) FROM student_course_enrollment
+		  WHERE (current_level_id = ? OR target_level_id = ?) AND deleted_at IS NULL) +
+		 (SELECT COUNT(*) FROM student_level_event WHERE from_level_id = ? OR to_level_id = ?)`, levelID, levelID, levelID, levelID).Scan(&n)
 	return n, err
 }
 
@@ -1058,4 +1063,19 @@ func (r *Repository) InsertLevelEvent(ctx context.Context, exec repository.Execu
 		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		studentID, enrollmentID, from, *toLevelID, eventType, eventDate, operatorID)
 	return err
+}
+
+// EffectiveEnrollmentLevel returns the latest level recorded for an enrollment.
+// Enrollment.current_level_id is retained as the initial snapshot; subsequent
+// transitions live in student_level_event and therefore take precedence.
+func (r *Repository) EffectiveEnrollmentLevel(ctx context.Context, exec repository.Executor, enrollmentID int64, initial *int64) (*int64, error) {
+	var levelID int64
+	err := exec.QueryRowContext(ctx, `SELECT to_level_id FROM student_level_event WHERE enrollment_id = ? ORDER BY id DESC LIMIT 1`, enrollmentID).Scan(&levelID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return initial, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &levelID, nil
 }
