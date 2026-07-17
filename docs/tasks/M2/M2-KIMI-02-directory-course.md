@@ -20,6 +20,7 @@
 5. `docs/acceptance/evidence/M2/contract-freeze.md`
 6. `docs/acceptance/evidence/M2/GLM-02BC.md`、`docs/acceptance/evidence/M2/KIMI-01.md`
 7. 本工单。
+8. `docs/standards/implementation-contract.md`。
 
 后端 handler、已有前端认证 adapter 与冻结契约共同构成唯一 API 事实源。请求路径没有 `/api` 前缀；所有业务请求必须通过 `authStore.authedRequest`，不得自行复制 refresh 或 Bearer 重试逻辑。
 

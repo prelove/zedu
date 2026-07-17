@@ -1,6 +1,6 @@
 # 编码规范
 
-- Go：`gofmt`、`go vet`；handler只处理HTTP，service负责业务/事务，repository封装GORM，DTO与model分离。
+- Go：`gofmt`、`go vet`；handler只处理HTTP，service负责业务/事务，repository基于`database/sql`封装参数化查询，DTO与model分离。不得引入或假设GORM。
 - TypeScript开启strict；用户文案使用i18n key，稳定英文标识不本地化。
 - 金额使用decimal或明确最小货币单位，禁止float；时间存UTC，展示按Asia/Tokyo。
 - 所有业务写操作有审计；日志不得包含密码、token、API Key、完整邮箱或凭证内容。

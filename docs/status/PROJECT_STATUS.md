@@ -28,7 +28,8 @@
 
 1. M2-KIMI-01 已验收：认证、受保护路由、Owner 初始化、三语与前端会话重试基础已并入本地 `main`，验收证据见 `docs/acceptance/evidence/M2/KIMI-01.md`。
 2. M2-KIMI-02 已 READY：按 `docs/tasks/M2/M2-KIMI-02-directory-course.md` 实施人员、课程、报名与安排页面；不得扩展至 M3+ 或任何财务、通知、凭证、排课能力。
-3. 稳定性 20 次重复扫描只在里程碑候选、迁移/并发基础设施变更或出现非确定性失败时执行。
+3. 实施者先阅读 `docs/standards/implementation-contract.md` 的统一数据库/后端/前端基线；仅在契约列出的触发条件下做定向扩展扫描。
+4. 稳定性 20 次重复扫描只在里程碑候选、迁移/并发基础设施变更或出现非确定性失败时执行。
 
 ## 阻塞
 
