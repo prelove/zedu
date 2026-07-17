@@ -40,4 +40,4 @@
 - M2-GLM-02A（显式初始化与受限重置）：ACCEPTED；`3bc4078` 已合并 `main`，Windows/Ubuntu CI 与 Linux race 全绿，证据见 `docs/acceptance/evidence/M2/GLM-02A.md`。
 - M2-GLM-02B/02C（人员资料、课程、报名与安排 API）：ACCEPTED。复验已覆盖分页、ACTIVE 学生约束、字典引用完整性、等级历史、错误/事务语义；额外收口了连续等级事件链、课程选择与等级变更的互斥写入、等级事件引用保护及 PRD 等级事件枚举。证据见 `docs/acceptance/evidence/M2/GLM-02BC.md`。新领域保持 `HTTP → application → repository` 分层，不回溯重构已验收认证/初始化。
 - M2-KIMI-01（认证前端、受保护路由、Owner 初始化界面）：ACCEPTED。复验补足了 Operator 被 Owner 路由拒绝后的可见三语提示，并将可变更的冒烟脚本改为显式的 disposable-environment 门禁；证据见 `docs/acceptance/evidence/M2/KIMI-01.md`。
-- M2-KIMI-02 已 READY：人员、课程、报名与安排页面/API 映射冻结后实施；M2-CODEX-02 等该任务及浏览器集成验收。
+- M2-KIMI-02 已 READY：人员、课程、报名与安排页面/API 映射已冻结，实施工单见 `docs/tasks/M2/M2-KIMI-02-directory-course.md`；M2-CODEX-02 等该任务及浏览器集成验收。
