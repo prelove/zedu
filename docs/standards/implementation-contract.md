@@ -107,6 +107,42 @@
 
 浏览器可变更测试必须显式指定 disposable 环境和 `ZEDU_SMOKE_ALLOW_MUTATION=1`，不得默认访问本机或共享数据。交付只暂存允许文件，遵循 Lore Commit Protocol，报告基线 SHA、改动、红绿、门禁、未测项、风险和回滚；执行者不更新共享状态、路线图、证据或 OpenSpec 勾选。
 
-## 8. 维护与变更触发
+## 8. 代码规模、命名与注释约束
+
+这些是**新增或实质修改文件**的默认上限，用于保持 AI 和人工均可快速阅读、审查和定位。它们是拆分触发器，不是要求在功能任务中重构全部既有代码的理由；既有超限文件须在工单中登记，只有修改触及同一职责时才做最小拆分。
+
+| 对象 | 推荐上限 | 超限时的动作 |
+|---|---:|---|
+| Go handler / service / repository 单文件 | 500 非空代码行 | 按资源、查询/写入、状态机或审计职责拆分；不跨领域搬迁。 |
+| Go 单个函数 | 60 非空代码行 | 提取命名明确的私有步骤；事务边界仍由 service 保持可见。 |
+| TypeScript adapter / store / utility 单文件 | 250 非空代码行 | 按 API 资源、状态职责或纯函数拆分；不得复制 HTTP/认证逻辑。 |
+| Vue 页面组件 | 350 非空代码行（script+template+style） | 提取领域子组件、表单段或展示组件；页面保留路由编排和用户流。 |
+| Vue 通用组件 | 200 非空代码行 | 拆出无状态展示组件或 composable；不得为一处使用引入泛化框架。 |
+| 单个测试文件 | 600 非空代码行 | 按资源/场景拆分；共享 fixture 放 `helpers`，不可把断言隐藏进不透明 helper。 |
+| 单个测试用例 | 80 非空代码行 | 以 Given/When/Then 抽取 setup；一个测试只证明一个关键行为。 |
+
+以下例外必须在交付报告中说明：迁移 SQL、locale 资源、可读性更好的表驱动测试、不可拆的事务状态机、以及有明确生成来源的文件。禁止为了满足行数删除断言、注释或验证。
+
+### 8.1 命名
+
+- Go：package 用简短小写领域名；导出标识使用 PascalCase 并有以名称开头的注释；未导出标识 camelCase。缩写统一 `ID`、`URL`、`API`、`HTTP`、`JWT`、`DB`、`JSON`；错误使用 `ErrXxx`，布尔值用 `is/has/can/should`，避免 `data`、`info`、`util`、`manager` 等无职责名。
+- Go DTO 名称表达边界：`StudentWrite`、`LoginResponse`；repository 方法表达意图：`Get...`、`List...`、`Create...`、`Update...`、`Count...`、`Insert...`。不得让 handler 直接拼 SQL。
+- TypeScript：变量/函数 camelCase，类型/interface/class PascalCase，常量和稳定错误键使用约定的 UPPER_SNAKE_CASE。API 文件使用资源小写或 kebab-case（如 `error-mapping.ts`），Vue 组件 PascalCase（如 `StudentListView.vue`），测试为同名 `*.test.ts`。
+- 路由名称用稳定英文领域名，URL 用 kebab-case；i18n key 按 `domain.intent` 分组，不把中文、日文或展示句子作为 key。
+- 禁止无语义缩写（`tmp`、`obj`、`res2`、`handleData`）；循环索引、短生命周期的错误变量和标准 `ctx/tx/db` 可例外。
+
+### 8.2 注释与结构
+
+- 注释解释**为什么、约束、边界或失败原因**，不逐行复述代码。业务不变量、并发条件、审计/安全决策、不可直观的时区和兼容性必须有注释并引用 PRD/OpenSpec/契约来源。
+- 公开 Go API、跨领域 adapter、通用 composable 和复杂状态机必须有简短文档注释；私有的直观代码不为凑注释率添加噪声。
+- TODO 必须包含可追踪任务/原因；禁止以 TODO、注释掉的旧代码、空 catch 或吞错代替实现。暂不支持的能力应由工单 Non-Goal 和负面测试表达。
+- 每个文件只承担一个可命名职责；import 按语言工具格式化，不手工维持无意义分组。重复三次以上或已出现跨页面状态时，再提取共享组件/composable；不要过早抽象。
+- 新增逻辑应让失败路径与成功路径同样可读：数据库/网络错误不得被 `_`、空 catch、默认成功值或 UI 静默吞掉。
+
+### 8.3 审查触发器
+
+新增或实质修改代码出现以下任一情况，提交前必须在交付报告说明拆分决定：超过上表上限；函数嵌套超过三层；相同请求/错误映射/表单校验复制两处；引入跨领域 import；或为了通过测试增加 test-only 生产分支。审查者可要求最小拆分，但不得借此扩大为无关重构。
+
+## 9. 维护与变更触发
 
 仅在独立验收后由 Codex/PM 更新本契约。以下情况必须先更新契约或创建 OpenSpec change：新依赖、迁移、角色、错误码、通用 HTTP/认证模式、跨领域事务、可变更浏览器策略或新的产品领域。领域字段、页面细节和一次性验收场景只写入当前工单，避免本文件膨胀为 PRD。
