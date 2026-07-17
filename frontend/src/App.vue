@@ -1,9 +1,16 @@
 <script setup lang="ts">
+import { onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import HealthStatus from './components/HealthStatus.vue'
-import LocaleSwitcher from './components/LocaleSwitcher.vue'
+import { authStore } from './stores/auth'
 
 const { t } = useI18n()
+
+// On app initialization, if there is an in-memory token (e.g. from a
+// same-session navigation), attempt to restore the user profile.
+// This does NOT persist across page reloads — the token is in-memory only.
+onMounted(() => {
+  void authStore.restore()
+})
 </script>
 
 <template>
@@ -13,13 +20,9 @@ const { t } = useI18n()
   >
     <header class="app-header">
       <h1>{{ t('app.name') }}</h1>
-      <LocaleSwitcher />
     </header>
     <main class="app-main">
-      <HealthStatus />
-      <p class="version-info">
-        {{ t('app.version') }}: {{ t('app.versionPlaceholder') }}
-      </p>
+      <RouterView />
     </main>
   </div>
 </template>
@@ -41,10 +44,5 @@ const { t } = useI18n()
 
 .app-main {
   padding: 1rem 0;
-}
-
-.version-info {
-  color: #6c757d;
-  font-size: 0.875rem;
 }
 </style>
