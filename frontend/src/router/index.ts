@@ -20,6 +20,45 @@ const routes: RouteRecordRaw[] = [
     component: () => import('../features/onboarding/OnboardingView.vue'),
     meta: { requiresAuth: true, requiresOwner: true },
   },
+  {
+    path: '/students',
+    name: 'students',
+    component: () => import('../features/directory/StudentsListView.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
+    path: '/students/:id',
+    name: 'student-detail',
+    component: () => import('../features/directory/StudentDetailView.vue'),
+    meta: { requiresAuth: true },
+    props: true,
+  },
+  {
+    path: '/teachers',
+    name: 'teachers',
+    component: () => import('../features/directory/TeachersListView.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
+    path: '/teachers/:id',
+    name: 'teacher-detail',
+    component: () => import('../features/directory/TeacherDetailView.vue'),
+    meta: { requiresAuth: true },
+    props: true,
+  },
+  {
+    path: '/courses',
+    name: 'courses',
+    component: () => import('../features/course/CourseDictionaryView.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
+    path: '/enrollments/:id',
+    name: 'enrollment-detail',
+    component: () => import('../features/course/EnrollmentDetailView.vue'),
+    meta: { requiresAuth: true },
+    props: true,
+  },
 ]
 
 export const router = createRouter({

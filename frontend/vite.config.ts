@@ -24,6 +24,38 @@ export default defineConfig({
         target: 'http://localhost:8080',
         changeOrigin: true,
       },
+      '/students': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+      },
+      '/teachers': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+      },
+      '/course-domains': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+      },
+      '/tracks': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+      },
+      '/levels': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+      },
+      '/capability-tags': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+      },
+      '/enrollments': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+      },
+      '/assignments': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+      },
     },
   },
 })

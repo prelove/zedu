@@ -27,7 +27,13 @@ describe('HomeView', () => {
   it('shows a localized permission notice after the Owner-only route guard redirects', async () => {
     const router = createRouter({
       history: createMemoryHistory(),
-      routes: [{ path: '/', component: HomeView }],
+      routes: [
+        { path: '/', component: HomeView },
+        { path: '/students', component: { template: '<div />' } },
+        { path: '/teachers', component: { template: '<div />' } },
+        { path: '/courses', component: { template: '<div />' } },
+        { path: '/onboarding', component: { template: '<div />' } },
+      ],
     })
     await router.push('/?denied=owner')
     await router.isReady()

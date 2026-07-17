@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { authStore } from '../src/stores/auth'
-import { ApiError } from '../src/api/http'
+import { ApiError, ApiErrorCode } from '../src/api/http'
 
 /**
  * Helper: create a mock Response with a JSON body.
@@ -358,6 +358,35 @@ describe('authStore', () => {
 
       await authStore.restore()
       expect(authStore.currentUser.value?.username).toBe('admin')
+    })
+  })
+
+  describe('authedRequest edge cases', () => {
+    it('throws AUTH_REQUIRED when no token is set', async () => {
+      authStore.clearSession()
+      try {
+        await authStore.authedRequest(async () => 'should not reach')
+        expect.fail('should throw')
+      } catch (err) {
+        expect(err).toBeInstanceOf(ApiError)
+        expect((err as ApiError).code).toBe(ApiErrorCode.AUTH_REQUIRED)
+      }
+    })
+
+    it('rethrows non-ApiError errors without retry', async () => {
+      authStore.state.accessToken = 'tok-123'
+      authStore.state.role = 'OWNER'
+      globalThis.fetch = vi.fn().mockRejectedValue(new TypeError('network'))
+
+      try {
+        await authStore.authedRequest(async () => {
+          // Simulate a non-ApiError throw.
+          throw new TypeError('custom error')
+        })
+        expect.fail('should throw')
+      } catch (err) {
+        expect(err).toBeInstanceOf(TypeError)
+      }
     })
   })
 })

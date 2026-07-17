@@ -54,6 +54,37 @@ function roleLabel(role: string | null): string {
         </p>
       </div>
       <div class="home-controls">
+        <nav
+          class="home-nav"
+          aria-label="main navigation"
+          data-testid="home-nav"
+        >
+          <RouterLink
+            to="/students"
+            data-testid="nav-students"
+          >
+            {{ t('nav.students') }}
+          </RouterLink>
+          <RouterLink
+            to="/teachers"
+            data-testid="nav-teachers"
+          >
+            {{ t('nav.teachers') }}
+          </RouterLink>
+          <RouterLink
+            to="/courses"
+            data-testid="nav-courses"
+          >
+            {{ t('nav.courses') }}
+          </RouterLink>
+          <RouterLink
+            v-if="authStore.isOwner.value"
+            to="/onboarding"
+            data-testid="nav-onboarding"
+          >
+            {{ t('nav.onboarding') }}
+          </RouterLink>
+        </nav>
         <button
           type="button"
           :disabled="loggingOut"
@@ -108,6 +139,26 @@ function roleLabel(role: string | null): string {
   display: flex;
   align-items: center;
   gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.home-nav {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.home-nav a {
+  padding: 0.3rem 0.6rem;
+  border: 1px solid #ccc;
+  border-radius: 0.25rem;
+  text-decoration: none;
+  color: #0d6efd;
+}
+
+.home-nav a.router-link-active {
+  background-color: #0d6efd;
+  color: #fff;
 }
 
 .logout-error {
