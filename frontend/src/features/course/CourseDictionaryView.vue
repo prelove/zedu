@@ -8,13 +8,20 @@ import {
   listLevels, createLevel, updateLevel,
   listTags, createTag, updateTag,
   type CourseDomain, type Track, type Level, type CapabilityTag,
-  type DomainWrite, type TrackWrite, type LevelWrite, type TagWrite,
-} from '../../api/course'
+} from '../../api/course-dict'
 import { ApiError, NetworkError } from '../../api/http'
 import { errorToI18nKey } from '../../api/error-mapping'
 import LoadingState from '../../components/LoadingState.vue'
 import ErrorState from '../../components/ErrorState.vue'
-import EmptyState from '../../components/EmptyState.vue'
+import DictionaryTab from './components/DictionaryTab.vue'
+
+interface DictItem { id: number; name: string; code: string; enabled: boolean; [k: string]: unknown }
+interface Column { key: string; label: string }
+interface FormField {
+  key: string; label: string; type: 'text' | 'number' | 'select'; testid: string
+  options?: { value: number | string; label: string }[]
+  defaultValue?: unknown
+}
 
 const { t } = useI18n()
 
@@ -27,16 +34,15 @@ const levels = ref<Level[]>([])
 const tags = ref<CapabilityTag[]>([])
 const loading = ref(false)
 const error = ref<unknown>(null)
-
-// Create forms.
-const showForm = ref(false)
-const saving = ref(false)
 const formError = ref<string | null>(null)
+const saving = ref(false)
 
-const domainForm = ref<DomainWrite>({ name: '', code: '', type: 'LANGUAGE', sortOrder: 0 })
-const trackForm = ref<TrackWrite>({ domainId: 0, name: '', code: '', sortOrder: 0 })
-const levelForm = ref<LevelWrite>({ trackId: 0, name: '', code: '', sortOrder: 0 })
-const tagForm = ref<TagWrite>({ domainId: 0, name: '', code: '', sortOrder: 0 })
+function domainName(id: number): string {
+  return domains.value.find((d) => d.id === id)?.name ?? String(id)
+}
+function trackName(id: number): string {
+  return tracks.value.find((tr) => tr.id === id)?.name ?? String(id)
+}
 
 async function loadAll(): Promise<void> {
   loading.value = true
@@ -63,87 +69,143 @@ onMounted(() => {
   void loadAll()
 })
 
-function openForm(): void {
-  showForm.value = true
-  formError.value = null
-  if (activeTab.value === 'domains') {
-    domainForm.value = { name: '', code: '', type: 'LANGUAGE', sortOrder: 0 }
-  } else if (activeTab.value === 'tracks') {
-    trackForm.value = { domainId: domains.value[0]?.id ?? 0, name: '', code: '', sortOrder: 0 }
-  } else if (activeTab.value === 'levels') {
-    levelForm.value = { trackId: tracks.value[0]?.id ?? 0, name: '', code: '', sortOrder: 0 }
-  } else {
-    tagForm.value = { domainId: domains.value[0]?.id ?? 0, name: '', code: '', sortOrder: 0 }
-  }
+function toErrorKey(err: unknown): string {
+  if (err instanceof NetworkError) return 'errors.NETWORK_ERROR'
+  if (err instanceof ApiError) return errorToI18nKey(err) ?? 'errors.UNKNOWN'
+  return 'errors.UNKNOWN'
 }
 
-async function handleCreate(): Promise<void> {
+async function handleCreate(body: Record<string, unknown>): Promise<void> {
   saving.value = true
   formError.value = null
   try {
     if (activeTab.value === 'domains') {
-      await authStore.authedRequest((token) => createDomain(token, domainForm.value))
+      await authStore.authedRequest((token) => createDomain(token, body))
     } else if (activeTab.value === 'tracks') {
-      if (!trackForm.value.domainId) { formError.value = 'errors.UNKNOWN'; return }
-      await authStore.authedRequest((token) => createTrack(token, trackForm.value))
+      if (!body.domainId) { formError.value = 'errors.UNKNOWN'; return }
+      await authStore.authedRequest((token) => createTrack(token, body))
     } else if (activeTab.value === 'levels') {
-      if (!levelForm.value.trackId) { formError.value = 'errors.UNKNOWN'; return }
-      await authStore.authedRequest((token) => createLevel(token, levelForm.value))
+      if (!body.trackId) { formError.value = 'errors.UNKNOWN'; return }
+      await authStore.authedRequest((token) => createLevel(token, body))
     } else {
-      if (!tagForm.value.domainId) { formError.value = 'errors.UNKNOWN'; return }
-      await authStore.authedRequest((token) => createTag(token, tagForm.value))
+      if (!body.domainId) { formError.value = 'errors.UNKNOWN'; return }
+      await authStore.authedRequest((token) => createTag(token, body))
     }
-    showForm.value = false
     await loadAll()
   } catch (err) {
-    if (err instanceof NetworkError) formError.value = 'errors.NETWORK_ERROR'
-    else if (err instanceof ApiError) formError.value = errorToI18nKey(err) ?? 'errors.UNKNOWN'
-    else formError.value = 'errors.UNKNOWN'
+    formError.value = toErrorKey(err)
   } finally {
     saving.value = false
   }
 }
 
-async function toggleEnabled(
-  item: CourseDomain | Track | Level | CapabilityTag,
-  kind: TabName,
-): Promise<void> {
+async function handleEdit(item: DictItem, body: Record<string, unknown>): Promise<void> {
+  saving.value = true
+  formError.value = null
   try {
-    const body = { enabled: !item.enabled }
-    if (kind === 'domains') {
+    if (activeTab.value === 'domains') {
       await authStore.authedRequest((token) => updateDomain(token, item.id, body))
-    } else if (kind === 'tracks') {
+    } else if (activeTab.value === 'tracks') {
       await authStore.authedRequest((token) => updateTrack(token, item.id, body))
-    } else if (kind === 'levels') {
+    } else if (activeTab.value === 'levels') {
       await authStore.authedRequest((token) => updateLevel(token, item.id, body))
     } else {
       await authStore.authedRequest((token) => updateTag(token, item.id, body))
     }
     await loadAll()
   } catch (err) {
-    // 42201 = referenced item cannot be disabled; show stable error.
-    if (err instanceof ApiError) {
-      formError.value = errorToI18nKey(err) ?? 'errors.UNKNOWN'
-    } else if (err instanceof NetworkError) {
-      formError.value = 'errors.NETWORK_ERROR'
-    } else {
-      formError.value = 'errors.UNKNOWN'
-    }
+    formError.value = toErrorKey(err)
+  } finally {
+    saving.value = false
   }
 }
 
-function domainName(id: number): string {
-  return domains.value.find((d) => d.id === id)?.name ?? String(id)
-}
-function trackName(id: number): string {
-  return tracks.value.find((tr) => tr.id === id)?.name ?? String(id)
+async function handleToggle(item: DictItem): Promise<void> {
+  formError.value = null
+  try {
+    const body = { enabled: !item.enabled }
+    if (activeTab.value === 'domains') {
+      await authStore.authedRequest((token) => updateDomain(token, item.id, body))
+    } else if (activeTab.value === 'tracks') {
+      await authStore.authedRequest((token) => updateTrack(token, item.id, body))
+    } else if (activeTab.value === 'levels') {
+      await authStore.authedRequest((token) => updateLevel(token, item.id, body))
+    } else {
+      await authStore.authedRequest((token) => updateTag(token, item.id, body))
+    }
+    await loadAll()
+  } catch (err) {
+    formError.value = toErrorKey(err)
+  }
 }
 
-const currentItems = computed(() => {
+const currentItems = computed<DictItem[]>(() => {
   if (activeTab.value === 'domains') return domains.value
   if (activeTab.value === 'tracks') return tracks.value
   if (activeTab.value === 'levels') return levels.value
   return tags.value
+})
+
+const currentColumns = computed<Column[]>(() => {
+  const base: Column[] = [
+    { key: 'name', label: 'common.name' },
+    { key: 'code', label: 'common.code' },
+  ]
+  if (activeTab.value === 'domains') return [...base, { key: 'type', label: 'courses.domainType' }]
+  if (activeTab.value === 'tracks') return [...base, { key: 'domainName', label: 'courses.trackDomain' }]
+  if (activeTab.value === 'levels') return [...base, { key: 'trackName', label: 'courses.levelTrack' }]
+  return [...base, { key: 'domainName', label: 'courses.tagDomain' }]
+})
+
+const displayItems = computed<DictItem[]>(() => {
+  return currentItems.value.map((item) => {
+    const enriched: DictItem = { ...item }
+    if (activeTab.value === 'tracks' || activeTab.value === 'tags') {
+      enriched.domainName = domainName((item as Track | CapabilityTag).domainId)
+    } else if (activeTab.value === 'levels') {
+      enriched.trackName = trackName((item as Level).trackId)
+    }
+    return enriched
+  })
+})
+
+const currentFormFields = computed<FormField[]>(() => {
+  if (activeTab.value === 'domains') {
+    return [
+      { key: 'name', label: 'courses.domainName', type: 'text', testid: 'd-form-name' },
+      { key: 'code', label: 'courses.domainCode', type: 'text', testid: 'd-form-code' },
+      { key: 'type', label: 'courses.domainType', type: 'text', testid: 'd-form-type', defaultValue: 'LANGUAGE' },
+    ]
+  }
+  if (activeTab.value === 'tracks') {
+    return [
+      { key: 'domainId', label: 'courses.trackDomain', type: 'select', testid: 't-form-domain',
+        options: domains.value.map((d) => ({ value: d.id, label: d.name })) },
+      { key: 'name', label: 'courses.trackName', type: 'text', testid: 't-form-name' },
+      { key: 'code', label: 'courses.trackCode', type: 'text', testid: 't-form-code' },
+    ]
+  }
+  if (activeTab.value === 'levels') {
+    return [
+      { key: 'trackId', label: 'courses.levelTrack', type: 'select', testid: 'l-form-track',
+        options: tracks.value.map((tr) => ({ value: tr.id, label: tr.name })) },
+      { key: 'name', label: 'courses.levelName', type: 'text', testid: 'l-form-name' },
+      { key: 'code', label: 'courses.levelCode', type: 'text', testid: 'l-form-code' },
+    ]
+  }
+  return [
+    { key: 'domainId', label: 'courses.tagDomain', type: 'select', testid: 'g-form-domain',
+      options: domains.value.map((d) => ({ value: d.id, label: d.name })) },
+    { key: 'name', label: 'courses.tagName', type: 'text', testid: 'g-form-name' },
+    { key: 'code', label: 'courses.tagCode', type: 'text', testid: 'g-form-code' },
+  ]
+})
+
+const createLabel = computed(() => {
+  if (activeTab.value === 'domains') return 'courses.createDomain'
+  if (activeTab.value === 'tracks') return 'courses.createTrack'
+  if (activeTab.value === 'levels') return 'courses.createLevel'
+  return 'courses.createTag'
 })
 </script>
 
@@ -196,280 +258,34 @@ const currentItems = computed(() => {
       </button>
     </div>
 
-    <button
-      type="button"
-      data-testid="course-create-btn"
-      @click="openForm"
-    >
-      {{
-        activeTab === 'domains' ? t('courses.createDomain') :
-        activeTab === 'tracks' ? t('courses.createTrack') :
-        activeTab === 'levels' ? t('courses.createLevel') :
-        t('courses.createTag')
-      }}
-    </button>
-
-    <p
-      v-if="formError"
-      class="form-error"
-      role="alert"
-      aria-live="assertive"
-      data-testid="course-form-error"
-    >
-      {{ t(formError) }}
-    </p>
-    <p
-      v-if="formError === 'apiErrors.INVALID_STATE'"
-      class="form-hint"
-      data-testid="course-referenced-hint"
-    >
-      {{ t('courses.referencedCannotDisable') }}
-    </p>
-
     <LoadingState v-if="loading" />
     <ErrorState
       v-else-if="error"
       :error="error"
       @retry="loadAll"
     />
-    <EmptyState
-      v-else-if="currentItems.length === 0"
-    />
-    <table
+    <DictionaryTab
       v-else
-      data-testid="course-table"
-    >
-      <thead>
-        <tr>
-          <th>{{ t('common.name') }}</th>
-          <th>{{ t('common.code') }}</th>
-          <th v-if="activeTab === 'domains'">
-            {{ t('courses.domainType') }}
-          </th>
-          <th v-if="activeTab === 'tracks'">
-            {{ t('courses.trackDomain') }}
-          </th>
-          <th v-if="activeTab === 'levels'">
-            {{ t('courses.levelTrack') }}
-          </th>
-          <th v-if="activeTab === 'tags'">
-            {{ t('courses.tagDomain') }}
-          </th>
-          <th>{{ t('common.status') }}</th>
-          <th>{{ t('common.actions') }}</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr
-          v-for="item in currentItems"
-          :key="item.id"
-          data-testid="course-row"
-        >
-          <td>{{ item.name }}</td>
-          <td>{{ item.code }}</td>
-          <td v-if="activeTab === 'domains'">
-            {{ (item as CourseDomain).type }}
-          </td>
-          <td v-if="activeTab === 'tracks'">
-            {{ domainName((item as Track).domainId) }}
-          </td>
-          <td v-if="activeTab === 'levels'">
-            {{ trackName((item as Level).trackId) }}
-          </td>
-          <td v-if="activeTab === 'tags'">
-            {{ domainName((item as CapabilityTag).domainId) }}
-          </td>
-          <td>{{ item.enabled ? t('common.enabled') : t('common.disabled') }}</td>
-          <td>
-            <button
-              type="button"
-              :data-testid="`course-toggle-${item.id}`"
-              @click="toggleEnabled(item, activeTab)"
-            >
-              {{ item.enabled ? t('common.disable') : t('common.enable') }}
-            </button>
-          </td>
-        </tr>
-      </tbody>
-    </table>
-
-    <!-- Create form -->
-    <div
-      v-if="showForm"
-      class="create-dialog"
-      data-testid="course-create-form"
-    >
-      <form @submit.prevent="handleCreate">
-        <!-- Domain form -->
-        <template v-if="activeTab === 'domains'">
-          <div class="form-field">
-            <label for="d-name">{{ t('courses.domainName') }} *</label>
-            <input
-              id="d-name"
-              v-model="domainForm.name"
-              type="text"
-              required
-              data-testid="d-form-name"
-            >
-          </div>
-          <div class="form-field">
-            <label for="d-code">{{ t('courses.domainCode') }} *</label>
-            <input
-              id="d-code"
-              v-model="domainForm.code"
-              type="text"
-              required
-              data-testid="d-form-code"
-            >
-          </div>
-          <div class="form-field">
-            <label for="d-type">{{ t('courses.domainType') }}</label>
-            <input
-              id="d-type"
-              v-model="domainForm.type"
-              type="text"
-              data-testid="d-form-type"
-            >
-          </div>
-        </template>
-        <!-- Track form -->
-        <template v-if="activeTab === 'tracks'">
-          <div class="form-field">
-            <label for="t-domain">{{ t('courses.trackDomain') }} *</label>
-            <select
-              id="t-domain"
-              v-model.number="trackForm.domainId"
-              required
-              data-testid="t-form-domain"
-            >
-              <option
-                v-for="d in domains"
-                :key="d.id"
-                :value="d.id"
-              >
-                {{ d.name }}
-              </option>
-            </select>
-          </div>
-          <div class="form-field">
-            <label for="t-name">{{ t('courses.trackName') }} *</label>
-            <input
-              id="t-name"
-              v-model="trackForm.name"
-              type="text"
-              required
-              data-testid="t-form-name"
-            >
-          </div>
-          <div class="form-field">
-            <label for="t-code">{{ t('courses.trackCode') }} *</label>
-            <input
-              id="t-code"
-              v-model="trackForm.code"
-              type="text"
-              required
-              data-testid="t-form-code"
-            >
-          </div>
-        </template>
-        <!-- Level form -->
-        <template v-if="activeTab === 'levels'">
-          <div class="form-field">
-            <label for="l-track">{{ t('courses.levelTrack') }} *</label>
-            <select
-              id="l-track"
-              v-model.number="levelForm.trackId"
-              required
-              data-testid="l-form-track"
-            >
-              <option
-                v-for="tr in tracks"
-                :key="tr.id"
-                :value="tr.id"
-              >
-                {{ tr.name }}
-              </option>
-            </select>
-          </div>
-          <div class="form-field">
-            <label for="l-name">{{ t('courses.levelName') }} *</label>
-            <input
-              id="l-name"
-              v-model="levelForm.name"
-              type="text"
-              required
-              data-testid="l-form-name"
-            >
-          </div>
-          <div class="form-field">
-            <label for="l-code">{{ t('courses.levelCode') }} *</label>
-            <input
-              id="l-code"
-              v-model="levelForm.code"
-              type="text"
-              required
-              data-testid="l-form-code"
-            >
-          </div>
-        </template>
-        <!-- Tag form -->
-        <template v-if="activeTab === 'tags'">
-          <div class="form-field">
-            <label for="g-domain">{{ t('courses.tagDomain') }} *</label>
-            <select
-              id="g-domain"
-              v-model.number="tagForm.domainId"
-              required
-              data-testid="g-form-domain"
-            >
-              <option
-                v-for="d in domains"
-                :key="d.id"
-                :value="d.id"
-              >
-                {{ d.name }}
-              </option>
-            </select>
-          </div>
-          <div class="form-field">
-            <label for="g-name">{{ t('courses.tagName') }} *</label>
-            <input
-              id="g-name"
-              v-model="tagForm.name"
-              type="text"
-              required
-              data-testid="g-form-name"
-            >
-          </div>
-          <div class="form-field">
-            <label for="g-code">{{ t('courses.tagCode') }} *</label>
-            <input
-              id="g-code"
-              v-model="tagForm.code"
-              type="text"
-              required
-              data-testid="g-form-code"
-            >
-          </div>
-        </template>
-        <div class="form-actions">
-          <button
-            type="button"
-            :disabled="saving"
-            @click="showForm = false"
-          >
-            {{ t('common.cancel') }}
-          </button>
-          <button
-            type="submit"
-            :disabled="saving"
-            data-testid="course-create-submit"
-          >
-            {{ saving ? t('common.creating') : t('common.create') }}
-          </button>
-        </div>
-      </form>
-    </div>
+      :items="displayItems"
+      :columns="currentColumns"
+      :form-fields="currentFormFields"
+      :loading="false"
+      :error="null"
+      :page="1"
+      :page-size="100"
+      :total="currentItems.length"
+      :has-next="false"
+      :has-prev="false"
+      :can-create="true"
+      :saving="saving"
+      :form-error="formError"
+      :create-label="createLabel"
+      :edit-label="createLabel"
+      @create="handleCreate"
+      @edit="handleEdit"
+      @toggle="handleToggle"
+      @retry="loadAll"
+    />
   </div>
 </template>
 
@@ -501,79 +317,7 @@ const currentItems = computed(() => {
   font-weight: 600;
 }
 
-button {
-  padding: 0.4rem 0.8rem;
-  border: 1px solid #ccc;
-  border-radius: 0.25rem;
-  background-color: #fff;
-  cursor: pointer;
-}
-
-button:disabled {
-  color: #6c757d;
-  cursor: not-allowed;
-}
-
-table {
-  width: 100%;
-  border-collapse: collapse;
-  margin-top: 0.5rem;
-}
-
-th, td {
-  padding: 0.5rem;
-  text-align: left;
-  border-bottom: 1px solid #eee;
-}
-
-th {
-  font-weight: 600;
-  background-color: #f8f9fa;
-}
-
-.form-error {
-  color: #dc3545;
-  font-size: 0.875rem;
-  margin: 0.5rem 0;
-}
-
-.form-hint {
-  color: #856404;
-  font-size: 0.8125rem;
-  background-color: #fff3cd;
-  padding: 0.25rem 0.5rem;
-  border-radius: 0.25rem;
-  margin: 0.25rem 0;
-}
-
-.create-dialog {
-  border: 1px solid #ccc;
-  border-radius: 0.5rem;
-  padding: 1rem;
-  margin-top: 1rem;
-  background-color: #f8f9fa;
-}
-
-.form-field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  margin-bottom: 0.75rem;
-}
-
-.form-field label {
-  font-weight: 600;
-}
-
-.form-field input, .form-field select {
-  padding: 0.4rem;
-  border: 1px solid #ccc;
-  border-radius: 0.25rem;
-}
-
-.form-actions {
-  display: flex;
-  gap: 0.5rem;
-  justify-content: flex-end;
+h1 {
+  margin: 0 0 1rem 0;
 }
 </style>

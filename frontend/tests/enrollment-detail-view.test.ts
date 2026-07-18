@@ -169,10 +169,8 @@ describe('EnrollmentDetailView', () => {
     })
     await flushPromises()
 
-    // Change current level to N4 (id=2) — directly update the component's
-    // reactive ref since v-model.number on select doesn't work reliably in jsdom.
-    const vm = wrapper.vm as any
-    vm.selCurrentLevel = 2
+    // Change current level to N4 (id=2) via the select element.
+    await wrapper.find('[data-testid="sel-current-level"]').setValue(2)
     await wrapper.find('[data-testid="save-level-change"]').trigger('click')
     await flushPromises()
 
@@ -284,8 +282,7 @@ describe('EnrollmentDetailView', () => {
     await flushPromises()
 
     await wrapper.find('[data-testid="add-assignment-btn"]').trigger('click')
-    const vm = wrapper.vm as any
-    vm.assignForm = { teacherId: 3, roleType: 'MAIN' }
+    await wrapper.find('[data-testid="assign-form-teacher"]').setValue(3)
     await wrapper.find('[data-testid="assignment-create-form"] form').trigger('submit.prevent')
     await flushPromises()
 

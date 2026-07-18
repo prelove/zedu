@@ -317,8 +317,9 @@ describe('TeacherDetailView', () => {
     await flushPromises()
 
     await wrapper.find('[data-testid="add-availability-btn"]').trigger('click')
-    const vm = wrapper.vm as any
-    vm.availForm = { weekday: 2, startTime: '10:00', endTime: '11:00' }
+    await wrapper.find('[data-testid="avail-form-weekday"]').setValue(2)
+    await wrapper.find('[data-testid="avail-form-start"]').setValue('10:00')
+    await wrapper.find('[data-testid="avail-form-end"]').setValue('11:00')
     await wrapper.find('[data-testid="availability-create-form"] form').trigger('submit.prevent')
     await flushPromises()
 
