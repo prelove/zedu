@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -71,6 +72,40 @@ func TestLessonConfirmationCreatesAtomicFacts(t *testing.T) {
 	if status != http.StatusUnprocessableEntity || responseCode(data) != 42201 {
 		t.Fatalf("duplicate = %d %#v", status, data)
 	}
+}
+
+func TestConcurrentLessonConfirmationHasOneWinner(t *testing.T) {
+	ts := newLessonServer(t)
+	userID := seedLessonUser(t, ts.db, "concurrent-confirm-owner", "OWNER")
+	enrollmentID, assignmentID := seedActiveTeachingRelationship(t, ts.db)
+	token := lessonToken(t, userID, "OWNER")
+	status, data := lessonRequest(t, http.MethodPost, ts.srv.URL+"/lessons", token, map[string]any{"enrollmentId": enrollmentID, "assignmentId": assignmentID, "startAt": "2026-08-01T19:00:00", "durationMin": 60, "timezone": "Asia/Tokyo", "meetingType": "OFFLINE"})
+	if status != http.StatusCreated {
+		t.Fatalf("create = %d %#v", status, data)
+	}
+	id := int64(responseData(t, data)["id"].(float64))
+	var wg sync.WaitGroup
+	results := make(chan int, 2)
+	for range 2 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			code, _ := lessonRequest(t, http.MethodPost, ts.srv.URL+"/lessons/"+itoa(id)+"/confirm", token, map[string]any{"outcomeType": "ATTENDED", "lessonDeducted": "1", "chargeAmount": 0, "teacherPayAmount": 0})
+			results <- code
+		}()
+	}
+	wg.Wait()
+	close(results)
+	success := 0
+	for code := range results {
+		if code == http.StatusOK {
+			success++
+		}
+	}
+	if success != 1 {
+		t.Fatalf("successful confirmations = %d, want 1", success)
+	}
+	assertCount(t, ts.db, "SELECT COUNT(*) FROM attendance WHERE lesson_id=?", 1, id)
 }
 
 func TestLessonLifecycleUsesOnlyLessonAndAuditFacts(t *testing.T) {

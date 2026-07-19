@@ -63,7 +63,6 @@ func (h *Handler) confirmTx(ctx context.Context, id int64, u httpserver.AuthUser
 	}()
 	var student, enroll, teacher int64
 	var duration int
-	var charge int64
 	if err = tx.QueryRowContext(ctx, `SELECT student_id,enrollment_id,teacher_id,duration_min FROM lesson WHERE id=? AND status='SCHEDULED'`, id).Scan(&student, &enroll, &teacher, &duration); err != nil {
 		return ErrInvalid
 	}
