@@ -11,7 +11,9 @@ import (
 
 	"github.com/prelove/zedu/backend/internal/app/attendance"
 	appauth "github.com/prelove/zedu/backend/internal/app/auth"
+	"github.com/prelove/zedu/backend/internal/app/backup"
 	"github.com/prelove/zedu/backend/internal/app/course"
+	"github.com/prelove/zedu/backend/internal/app/dashboard"
 	"github.com/prelove/zedu/backend/internal/app/directory"
 	"github.com/prelove/zedu/backend/internal/app/evidence"
 	"github.com/prelove/zedu/backend/internal/app/finance"
@@ -63,6 +65,8 @@ func main() {
 	course.MountRoutes(mux, course.NewHandler(db, logger), db, jwtSecret)
 	lesson.MountRoutes(mux, lesson.NewHandler(db, logger), db, jwtSecret)
 	attendance.MountRoutes(mux, attendance.NewHandler(db), db, jwtSecret)
+	dashboard.MountRoutes(mux, db, jwtSecret)
+	backup.MountRoutes(mux, db, jwtSecret)
 	var notificationSender notification.Sender
 	if sender, err := notification.NewResendSenderFromEnv(); err == nil {
 		notificationSender = sender

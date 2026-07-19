@@ -2,6 +2,7 @@ import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 import { authStore } from '../stores/auth'
 
 const routes: RouteRecordRaw[] = [
+  { path: '/dashboard', name: 'dashboard', component: () => import('../features/dashboard/DashboardView.vue'), meta: { requiresAuth: true } },
   {
     path: '/login',
     name: 'login',
