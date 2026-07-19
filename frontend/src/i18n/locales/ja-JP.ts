@@ -394,3 +394,9 @@ Object.assign(((jaJP as Record<string, unknown>).financePayments ??= {}) as obje
   statusConfirmed: '確認済み',
   statusVoided: '取消済み',
 })
+
+Object.assign(((jaJP as Record<string, unknown>).lessons ??= {}) as object, { confirm: 'レッスンを確定', confirmTitle: 'レッスン完了を確定', outcome: '出欠結果', actualDuration: '実績時間（分）', lessonDeducted: '消化コマ数', chargeAmount: '請求額（基本通貨）', teacherPayAmount: '講師支払額（基本通貨）' })
+Object.assign(((jaJP as Record<string, unknown>).nav ??= {}) as object, { dashboard: 'ダッシュボード', notifications: '通知' })
+Object.assign(((jaJP as Record<string, unknown>).dashboard ??= {}) as object, { title: 'ダッシュボード', loadError: '運用データを読み込めません。', pendingConfirmations: '確認待ちレッスン：{count}', failedNotifications: '送信失敗の通知：{count}', createBackup: 'バックアップを作成', backupCreated: 'バックアップ：{file}' })
+Object.assign(((jaJP as Record<string, unknown>).notifications ??= {}) as object, { title: '通知', process: '送信待ちを処理', event: 'イベント', status: '状態', retry: '再試行' })
+Object.assign(((jaJP as Record<string, unknown>).financePayments ??= {}) as object, { filterStatus: '状態', statusAll: 'すべての状態', statusConfirmed: '確認済み', statusVoided: '取消済み' })

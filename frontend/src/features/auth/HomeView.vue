@@ -60,6 +60,12 @@ function roleLabel(role: string | null): string {
           data-testid="home-nav"
         >
           <RouterLink
+            to="/dashboard"
+            data-testid="nav-dashboard"
+          >
+            {{ t('nav.dashboard') }}
+          </RouterLink>
+          <RouterLink
             to="/students"
             data-testid="nav-students"
           >

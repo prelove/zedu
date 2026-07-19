@@ -49,16 +49,16 @@ type Payment struct {
 	Note              string `json:"note"`
 }
 type LedgerEntry struct {
-	ID                 int64  `json:"id"`
-	EnrollmentID       int64  `json:"enrollmentId"`
-	BizType            string `json:"bizType"`
-	AmountDelta        int64  `json:"amountDelta"`
-	LessonDelta        int64  `json:"lessonDelta"`
-	BalanceAfter       int64  `json:"balanceAfter"`
-	LessonBalanceAfter int64  `json:"lessonBalanceAfter"`
-	RelatedPaymentID   *int64 `json:"relatedPaymentId,omitempty"`
-	Note               string `json:"note"`
-	CreatedAt          string `json:"createdAt"`
+	ID                 int64   `json:"id"`
+	EnrollmentID       int64   `json:"enrollmentId"`
+	BizType            string  `json:"bizType"`
+	AmountDelta        int64   `json:"amountDelta"`
+	LessonDelta        float64 `json:"lessonDelta"`
+	BalanceAfter       int64   `json:"balanceAfter"`
+	LessonBalanceAfter float64 `json:"lessonBalanceAfter"`
+	RelatedPaymentID   *int64  `json:"relatedPaymentId,omitempty"`
+	Note               string  `json:"note"`
+	CreatedAt          string  `json:"createdAt"`
 }
 
 func (Repository) InsertPayment(ctx context.Context, exec repository.Executor, p Payment, originalAmount, originalCurrency, fxRate, method, methodName, paidAt, note string, operatorID int64) (int64, bool, error) {
@@ -164,7 +164,7 @@ func (Repository) VoidPayment(ctx context.Context, exec repository.Executor, id 
 	n, err := result.RowsAffected()
 	return n > 0, err
 }
-func (Repository) InsertVoidLedger(ctx context.Context, exec repository.Executor, p Payment, amountAfter int64, lessonAfter int64, operatorID int64, note string) error {
+func (Repository) InsertVoidLedger(ctx context.Context, exec repository.Executor, p Payment, amountAfter int64, lessonAfter float64, operatorID int64, note string) error {
 	_, err := exec.ExecContext(ctx, `INSERT INTO student_account_ledger (student_id,enrollment_id,biz_type,amount_delta,lesson_delta,balance_after,lesson_balance_after,related_payment_id,operator_id,note) VALUES (?,?,'VOID',?,?,?,?,?,?,?)`, p.StudentID, p.EnrollmentID, -p.AmountBase, -p.LessonsAdded, amountAfter, lessonAfter, p.ID, operatorID, note)
 	return err
 }
@@ -182,17 +182,17 @@ func (Repository) EnabledPaymentMethod(ctx context.Context, exec repository.Exec
 	}
 	return name, err == nil, err
 }
-func (Repository) EnrollmentBalances(ctx context.Context, exec repository.Executor, id int64) (int64, int64, error) {
+func (Repository) EnrollmentBalances(ctx context.Context, exec repository.Executor, id int64) (int64, float64, error) {
 	var amount int64
-	var lessons int64
+	var lessons float64
 	err := exec.QueryRowContext(ctx, `SELECT balance_amount,lesson_balance FROM student_course_enrollment WHERE id=?`, id).Scan(&amount, &lessons)
 	return amount, lessons, err
 }
-func (Repository) UpdateEnrollmentBalances(ctx context.Context, exec repository.Executor, id int64, amount int64, lessons int64) error {
+func (Repository) UpdateEnrollmentBalances(ctx context.Context, exec repository.Executor, id int64, amount int64, lessons float64) error {
 	_, err := exec.ExecContext(ctx, `UPDATE student_course_enrollment SET balance_amount=?,lesson_balance=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`, amount, lessons, id)
 	return err
 }
-func (Repository) InsertRechargeLedger(ctx context.Context, exec repository.Executor, p Payment, amountAfter int64, lessonAfter int64, operatorID int64, note string) error {
+func (Repository) InsertRechargeLedger(ctx context.Context, exec repository.Executor, p Payment, amountAfter int64, lessonAfter float64, operatorID int64, note string) error {
 	_, err := exec.ExecContext(ctx, `INSERT INTO student_account_ledger (student_id,enrollment_id,biz_type,amount_delta,lesson_delta,balance_after,lesson_balance_after,related_payment_id,operator_id,note) VALUES (?,?,'RECHARGE',?,?,?,?,?,?,?)`, p.StudentID, p.EnrollmentID, p.AmountBase, p.LessonsAdded, amountAfter, lessonAfter, p.ID, operatorID, note)
 	return err
 }

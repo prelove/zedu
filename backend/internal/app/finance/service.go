@@ -177,10 +177,10 @@ func (s *Service) CreatePayment(ctx context.Context, user httpserver.AuthUser, w
 	if err != nil {
 		return Payment{}, false, repository.ErrDatabase
 	}
-	if err := s.repo.InsertRechargeLedger(ctx, tx, p, balance+amount, lessons+w.LessonsAdded, user.UserID, w.Note); err != nil {
+	if err := s.repo.InsertRechargeLedger(ctx, tx, p, balance+amount, lessons+float64(w.LessonsAdded), user.UserID, w.Note); err != nil {
 		return Payment{}, false, repository.ErrDatabase
 	}
-	if err := s.repo.UpdateEnrollmentBalances(ctx, tx, w.EnrollmentID, balance+amount, lessons+w.LessonsAdded); err != nil {
+	if err := s.repo.UpdateEnrollmentBalances(ctx, tx, w.EnrollmentID, balance+amount, lessons+float64(w.LessonsAdded)); err != nil {
 		return Payment{}, false, repository.ErrDatabase
 	}
 	if err := s.repo.LockBaseCurrency(ctx, tx); err != nil {
@@ -255,10 +255,10 @@ func (s *Service) VoidPayment(ctx context.Context, user httpserver.AuthUser, id 
 	if !ok {
 		return Payment{}, ErrInvalidState
 	}
-	if err := s.repo.InsertVoidLedger(ctx, tx, p, balance-p.AmountBase, lessons-p.LessonsAdded, user.UserID, reason); err != nil {
+	if err := s.repo.InsertVoidLedger(ctx, tx, p, balance-p.AmountBase, lessons-float64(p.LessonsAdded), user.UserID, reason); err != nil {
 		return Payment{}, repository.ErrDatabase
 	}
-	if err := s.repo.UpdateEnrollmentBalances(ctx, tx, p.EnrollmentID, balance-p.AmountBase, lessons-p.LessonsAdded); err != nil {
+	if err := s.repo.UpdateEnrollmentBalances(ctx, tx, p.EnrollmentID, balance-p.AmountBase, lessons-float64(p.LessonsAdded)); err != nil {
 		return Payment{}, repository.ErrDatabase
 	}
 	if err := s.repo.InsertAudit(ctx, tx, user.UserID, "PAYMENT_VOID", requestID); err != nil {

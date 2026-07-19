@@ -394,3 +394,9 @@ Object.assign(((enUS as Record<string, unknown>).nav ??= {}) as object, { lesson
 Object.assign(((enUS as Record<string, unknown>).lessons ??= {}) as object, {
   title: 'Lesson scheduling', enrollmentId: 'Enrollment ID', assignmentId: 'Assignment ID', startAt: 'Start time', duration: 'Duration (minutes)', timezone: 'Timezone', meetingType: 'Meeting type', meetingLink: 'Meeting link', topic: 'Topic', create: 'Schedule lesson', status: 'Status', scheduled: 'Scheduled', completed: 'Completed', cancelled: 'Cancelled', cancel: 'Cancel lesson', cancelReason: 'Cancellation reason', empty: 'No lessons found.', offline: 'Offline',
 })
+
+Object.assign(((enUS as Record<string, unknown>).lessons ??= {}) as object, { confirm: 'Confirm lesson', confirmTitle: 'Confirm lesson completion', outcome: 'Attendance outcome', actualDuration: 'Actual duration (minutes)', lessonDeducted: 'Lessons deducted', chargeAmount: 'Charge amount (base currency)', teacherPayAmount: 'Teacher pay amount (base currency)' })
+Object.assign(((enUS as Record<string, unknown>).nav ??= {}) as object, { dashboard: 'Dashboard', notifications: 'Notifications' })
+Object.assign(((enUS as Record<string, unknown>).dashboard ??= {}) as object, { title: 'Dashboard', loadError: 'Unable to load operations data.', pendingConfirmations: 'Pending confirmations: {count}', failedNotifications: 'Failed notifications: {count}', createBackup: 'Create backup', backupCreated: 'Backup: {file}' })
+Object.assign(((enUS as Record<string, unknown>).notifications ??= {}) as object, { title: 'Notifications', process: 'Process outbox', event: 'Event', status: 'Status', retry: 'Retry' })
+Object.assign(((enUS as Record<string, unknown>).financePayments ??= {}) as object, { filterStatus: 'Status', statusAll: 'All statuses', statusConfirmed: 'Confirmed', statusVoided: 'Voided' })

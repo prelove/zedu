@@ -394,3 +394,8 @@ Object.assign(((zhCN as Record<string, unknown>).nav ??= {}) as object, { lesson
 Object.assign(((zhCN as Record<string, unknown>).lessons ??= {}) as object, {
   title: '课程安排', enrollmentId: '报名编号', assignmentId: '师生安排编号', startAt: '开始时间', duration: '时长（分钟）', timezone: '时区', meetingType: '上课方式', meetingLink: '会议链接', topic: '课程主题', create: '创建课程', status: '状态', scheduled: '已排课', completed: '已完成', cancelled: '已取消', cancel: '取消课程', cancelReason: '取消原因', empty: '暂无课程。', offline: '线下',
 })
+
+Object.assign(((zhCN as Record<string, unknown>).lessons ??= {}) as object, { confirm: '确认课后记录', confirmTitle: '确认课程完成', outcome: '出勤结果', actualDuration: '实际时长（分钟）', lessonDeducted: '扣除课时', chargeAmount: '扣费金额（本位币）', teacherPayAmount: '教师应付金额（本位币）' })
+Object.assign(((zhCN as Record<string, unknown>).nav ??= {}) as object, { dashboard: '工作台', notifications: '通知' })
+Object.assign(((zhCN as Record<string, unknown>).dashboard ??= {}) as object, { title: '工作台', loadError: '无法加载运营数据。', pendingConfirmations: '待确认课程：{count}', failedNotifications: '发送失败通知：{count}', createBackup: '创建备份', backupCreated: '备份文件：{file}' })
+Object.assign(((zhCN as Record<string, unknown>).notifications ??= {}) as object, { title: '通知', process: '处理发件箱', event: '事件', status: '状态', retry: '重试' })

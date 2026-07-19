@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { cancelLesson, confirmLesson, listAttendanceOutcomes, listLessons, type Lesson, type LessonWrite } from '../../api/lesson'
+import { cancelLesson, confirmLesson, createLesson, listAttendanceOutcomes, listLessons, type AttendanceOutcome, type Lesson, type LessonWrite } from '../../api/lesson'
 import { errorToI18nKey } from '../../api/error-mapping'
 import ErrorState from '../../components/ErrorState.vue'
 import LoadingState from '../../components/LoadingState.vue'
@@ -18,6 +18,10 @@ const total = ref(0)
 const page = ref(1)
 const pageSize = 20
 const filters = reactive({ status: '' })
+const confirmationTarget = ref<Lesson | null>(null)
+const attendanceOutcomes = ref<AttendanceOutcome[]>([])
+const confirmationForm = reactive({ outcomeType: '', lessonDeducted: '0', chargeAmount: 0, teacherPayAmount: 0, actualDurationMin: 0, note: '' })
+const confirmationOutcome = computed(() => attendanceOutcomes.value.find((outcome) => outcome.code === confirmationForm.outcomeType))
 const form = reactive<LessonWrite>({
   enrollmentId: 0,
   assignmentId: 0,
@@ -74,14 +78,38 @@ async function cancel(item: Lesson): Promise<void> {
   }
 }
 
-async function confirm(item: Lesson): Promise<void> {
-  const outcomes = await authStore.authedRequest((token) => listAttendanceOutcomes(token))
-  const outcomeType = window.prompt(`Attendance outcome (${outcomes.map((outcome) => outcome.code).join(', ')})`, outcomes[0]?.code ?? '')
-  if (!outcomeType) return
+async function openConfirmation(item: Lesson): Promise<void> {
+  actionError.value = null
   try {
-    await authStore.authedRequest((token) => confirmLesson(token, item.id, { outcomeType, lessonDeducted: '1', chargeAmount: 0, teacherPayAmount: 0, actualDurationMin: item.durationMin }))
-    await load(page.value)
+    attendanceOutcomes.value = await authStore.authedRequest((token) => listAttendanceOutcomes(token))
+    const first = attendanceOutcomes.value[0]
+    if (!first) {
+      actionError.value = 'errors.UNKNOWN'
+      return
+    }
+    confirmationTarget.value = item
+    confirmationForm.outcomeType = first.code
+    confirmationForm.lessonDeducted = first.suggestedLessonDeducted || '0'
+    confirmationForm.chargeAmount = 0
+    confirmationForm.teacherPayAmount = 0
+    confirmationForm.actualDurationMin = item.durationMin
+    confirmationForm.note = ''
   } catch (caught) { actionError.value = errorKey(caught) }
+}
+
+function applyOutcomeSuggestion(): void {
+  if (confirmationOutcome.value) confirmationForm.lessonDeducted = confirmationOutcome.value.suggestedLessonDeducted || '0'
+}
+
+async function submitConfirmation(): Promise<void> {
+  if (!confirmationTarget.value) return
+  submitting.value = true
+  actionError.value = null
+  try {
+    await authStore.authedRequest((token) => confirmLesson(token, confirmationTarget.value!.id, { ...confirmationForm }))
+    confirmationTarget.value = null
+    await load(page.value)
+  } catch (caught) { actionError.value = errorKey(caught) } finally { submitting.value = false }
 }
 
 onMounted(() => { void load() })
@@ -179,9 +207,10 @@ onMounted(() => { void load() })
               <button
                 v-if="item.status === 'SCHEDULED'"
                 type="button"
-                @click="confirm(item)"
+                data-testid="lesson-confirm-open"
+                @click="openConfirmation(item)"
               >
-                Confirm
+                {{ t('lessons.confirm') }}
               </button>
             </td>
           </tr>
@@ -194,6 +223,71 @@ onMounted(() => { void load() })
         @page-change="load"
       />
     </template>
+    <section
+      v-if="confirmationTarget"
+      class="confirmation-dialog"
+      data-testid="lesson-confirm-dialog"
+      role="dialog"
+      aria-modal="true"
+      :aria-label="t('lessons.confirmTitle')"
+    >
+      <form @submit.prevent="submitConfirmation">
+        <h2>{{ t('lessons.confirmTitle') }}</h2>
+        <label>{{ t('lessons.outcome') }}<select
+          v-model="confirmationForm.outcomeType"
+          data-testid="lesson-confirm-outcome"
+          required
+          @change="applyOutcomeSuggestion"
+        ><option
+          v-for="outcome in attendanceOutcomes"
+          :key="outcome.code"
+          :value="outcome.code"
+        >{{ outcome.name }} ({{ outcome.code }})</option></select></label>
+        <label>{{ t('lessons.actualDuration') }}<input
+          v-model.number="confirmationForm.actualDurationMin"
+          data-testid="lesson-confirm-duration"
+          type="number"
+          min="0"
+          :max="confirmationTarget.durationMin * 2"
+          required
+        ></label>
+        <label>{{ t('lessons.lessonDeducted') }}<input
+          v-model="confirmationForm.lessonDeducted"
+          data-testid="lesson-confirm-deducted"
+          inputmode="decimal"
+          pattern="\\d+(\\.\\d{1,3})?"
+          required
+        ></label>
+        <label>{{ t('lessons.chargeAmount') }}<input
+          v-model.number="confirmationForm.chargeAmount"
+          data-testid="lesson-confirm-charge"
+          type="number"
+          min="0"
+          step="1"
+          required
+        ></label>
+        <label>{{ t('lessons.teacherPayAmount') }}<input
+          v-model.number="confirmationForm.teacherPayAmount"
+          data-testid="lesson-confirm-teacher-pay"
+          type="number"
+          min="0"
+          step="1"
+          required
+        ></label>
+        <label>{{ t('common.note') }}<input v-model="confirmationForm.note"></label>
+        <div class="confirmation-actions">
+          <button
+            type="button"
+            @click="confirmationTarget = null"
+          >{{ t('common.cancel') }}</button>
+          <button
+            type="submit"
+            data-testid="lesson-confirm-submit"
+            :disabled="submitting"
+          >{{ submitting ? t('common.saving') : t('lessons.confirm') }}</button>
+        </div>
+      </form>
+    </section>
   </main>
 </template>
 
@@ -202,4 +296,7 @@ onMounted(() => { void load() })
 .lesson-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: .75rem; margin-bottom: 1rem; }
 label { display: grid; gap: .25rem; } input, select, button { padding: .4rem; }
 table { width: 100%; border-collapse: collapse; margin-top: 1rem; } th, td { border: 1px solid #ddd; padding: .5rem; text-align: left; }
+.confirmation-dialog { position: fixed; inset: 0; z-index: 10; display: grid; place-items: center; padding: 1rem; background: rgb(0 0 0 / 45%); }
+.confirmation-dialog form { display: grid; gap: .75rem; width: min(100%, 460px); padding: 1rem; border-radius: .4rem; background: #fff; }
+.confirmation-actions { display: flex; justify-content: flex-end; gap: .5rem; }
 </style>

@@ -2,6 +2,7 @@ package lesson_test
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"io"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/prelove/zedu/backend/internal/app/attendance"
+	"github.com/prelove/zedu/backend/internal/app/finance"
 	"github.com/prelove/zedu/backend/internal/app/lesson"
 	"github.com/prelove/zedu/backend/internal/platform/auth"
 	"github.com/prelove/zedu/backend/internal/platform/database"
@@ -64,6 +66,14 @@ func TestLessonConfirmationCreatesAtomicFacts(t *testing.T) {
 	assertCount(t, ts.db, "SELECT COUNT(*) FROM attendance WHERE lesson_id=?", 1, id)
 	assertCount(t, ts.db, "SELECT COUNT(*) FROM lesson_finance WHERE lesson_id=?", 1, id)
 	assertCount(t, ts.db, "SELECT COUNT(*) FROM teacher_account_ledger WHERE lesson_id=?", 1, id)
+	var studentID int64
+	if err := ts.db.QueryRow("SELECT student_id FROM lesson WHERE id=?", id).Scan(&studentID); err != nil {
+		t.Fatal(err)
+	}
+	entries, _, err := (finance.Repository{}).ListStudentLedger(context.Background(), ts.db, studentID, 20, 0)
+	if err != nil || len(entries) != 1 || entries[0].LessonDelta != -1 || entries[0].LessonBalanceAfter != -1 {
+		t.Fatalf("confirmed ledger must remain readable: entries=%#v err=%v", entries, err)
+	}
 	var lessonStatus string
 	if err := ts.db.QueryRow("SELECT status FROM lesson WHERE id=?", id).Scan(&lessonStatus); err != nil || lessonStatus != "COMPLETED" {
 		t.Fatalf("lesson status=%s err=%v", lessonStatus, err)
@@ -71,6 +81,30 @@ func TestLessonConfirmationCreatesAtomicFacts(t *testing.T) {
 	status, data = lessonRequest(t, http.MethodPost, ts.srv.URL+"/lessons/"+itoa(id)+"/confirm", token, map[string]any{"outcomeType": "ATTENDED", "lessonDeducted": "1", "chargeAmount": 0, "teacherPayAmount": 0})
 	if status != http.StatusUnprocessableEntity || responseCode(data) != 42201 {
 		t.Fatalf("duplicate = %d %#v", status, data)
+	}
+}
+
+func TestFractionalLessonConfirmationKeepsLedgerReadable(t *testing.T) {
+	ts := newLessonServer(t)
+	userID := seedLessonUser(t, ts.db, "fractional-confirm-owner", "OWNER")
+	enrollmentID, assignmentID := seedActiveTeachingRelationship(t, ts.db)
+	token := lessonToken(t, userID, "OWNER")
+	status, data := lessonRequest(t, http.MethodPost, ts.srv.URL+"/lessons", token, map[string]any{"enrollmentId": enrollmentID, "assignmentId": assignmentID, "startAt": "2026-08-01T19:00:00", "durationMin": 60, "timezone": "Asia/Tokyo", "meetingType": "OFFLINE"})
+	if status != http.StatusCreated {
+		t.Fatalf("create = %d %#v", status, data)
+	}
+	id := int64(responseData(t, data)["id"].(float64))
+	status, data = lessonRequest(t, http.MethodPost, ts.srv.URL+"/lessons/"+itoa(id)+"/confirm", token, map[string]any{"outcomeType": "STUDENT_LEAVE", "lessonDeducted": "0.5", "chargeAmount": 0, "teacherPayAmount": 0, "actualDurationMin": 30})
+	if status != http.StatusOK {
+		t.Fatalf("confirm = %d %#v", status, data)
+	}
+	var studentID int64
+	if err := ts.db.QueryRow("SELECT student_id FROM lesson WHERE id=?", id).Scan(&studentID); err != nil {
+		t.Fatal(err)
+	}
+	entries, _, err := (finance.Repository{}).ListStudentLedger(context.Background(), ts.db, studentID, 20, 0)
+	if err != nil || len(entries) != 1 || entries[0].LessonDelta != -0.5 || entries[0].LessonBalanceAfter != -0.5 {
+		t.Fatalf("fractional ledger must remain readable: entries=%#v err=%v", entries, err)
 	}
 }
 
@@ -128,6 +162,30 @@ func TestLessonConfirmationInsufficientBalanceRollsBackAttendance(t *testing.T) 
 	if err := ts.db.QueryRow("SELECT status FROM lesson WHERE id=?", id).Scan(&lessonStatus); err != nil || lessonStatus != "SCHEDULED" {
 		t.Fatalf("lesson status=%s err=%v", lessonStatus, err)
 	}
+}
+
+func TestLessonConfirmationRejectsNegativeOrMalformedBusinessFacts(t *testing.T) {
+	ts := newLessonServer(t)
+	userID := seedLessonUser(t, ts.db, "confirmation-validation-owner", "OWNER")
+	enrollmentID, assignmentID := seedActiveTeachingRelationship(t, ts.db)
+	token := lessonToken(t, userID, "OWNER")
+	status, data := lessonRequest(t, http.MethodPost, ts.srv.URL+"/lessons", token, map[string]any{"enrollmentId": enrollmentID, "assignmentId": assignmentID, "startAt": "2026-08-01T19:00:00", "durationMin": 60, "timezone": "Asia/Tokyo", "meetingType": "OFFLINE"})
+	if status != http.StatusCreated {
+		t.Fatalf("create = %d %#v", status, data)
+	}
+	id := int64(responseData(t, data)["id"].(float64))
+	for _, input := range []map[string]any{
+		{"outcomeType": "ATTENDED", "lessonDeducted": "-1", "chargeAmount": 0, "teacherPayAmount": 0},
+		{"outcomeType": "ATTENDED", "lessonDeducted": "one", "chargeAmount": 0, "teacherPayAmount": 0},
+		{"outcomeType": "ATTENDED", "lessonDeducted": "0.1234", "chargeAmount": 0, "teacherPayAmount": 0},
+		{"outcomeType": "ATTENDED", "lessonDeducted": "1", "chargeAmount": 0, "teacherPayAmount": 0, "actualDurationMin": -1},
+	} {
+		status, data = lessonRequest(t, http.MethodPost, ts.srv.URL+"/lessons/"+itoa(id)+"/confirm", token, input)
+		if status != http.StatusUnprocessableEntity || responseCode(data) != 42201 {
+			t.Fatalf("invalid confirmation = %d %#v", status, data)
+		}
+	}
+	assertCount(t, ts.db, "SELECT COUNT(*) FROM attendance WHERE lesson_id=?", 0, id)
 }
 
 func TestLessonLifecycleUsesOnlyLessonAndAuditFacts(t *testing.T) {

@@ -7,12 +7,16 @@ import (
 	"errors"
 	"github.com/prelove/zedu/backend/internal/platform/httpserver"
 	"github.com/prelove/zedu/backend/internal/repository"
+	"math/big"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 )
 
 var ErrInvalid = errors.New("invalid")
+
+var decimalLessonCount = regexp.MustCompile(`^\d+(?:\.\d{1,3})?$`)
 
 type ConfirmWrite struct {
 	OutcomeType       string `json:"outcomeType"`
@@ -59,19 +63,33 @@ func (h *Handler) confirm(w http.ResponseWriter, r *http.Request) {
 	}
 	id, e := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	var in ConfirmWrite
-	if e != nil || json.NewDecoder(r.Body).Decode(&in) != nil || strings.TrimSpace(in.OutcomeType) == "" || in.ChargeAmount < 0 || in.TeacherPayAmount < 0 || strings.TrimSpace(in.LessonDeducted) == "" {
+	if e != nil || json.NewDecoder(r.Body).Decode(&in) != nil || strings.TrimSpace(in.OutcomeType) == "" || in.ChargeAmount < 0 || in.TeacherPayAmount < 0 || in.ActualDurationMin < 0 || !validLessonDeducted(in.LessonDeducted) {
 		httpserver.WriteErrorFromContext(w, r, 422, httpserver.CodeInvalidState, "INVALID_STATE")
 		return
 	}
 	if e = h.confirmTx(r.Context(), id, u, in, httpserver.RequestIDFromContext(r.Context())); e != nil {
 		code, status := httpserver.CodeDatabase, 500
+		message := "DATABASE_ERROR"
 		if errors.Is(e, ErrInvalid) {
 			code, status = httpserver.CodeInvalidState, 422
+			message = "INVALID_STATE"
 		}
-		httpserver.WriteErrorFromContext(w, r, status, code, "INVALID_STATE")
+		httpserver.WriteErrorFromContext(w, r, status, code, message)
 		return
 	}
 	httpserver.WriteSuccess(w, 200, map[string]int64{"lessonId": id})
+}
+
+// validLessonDeducted accepts only non-negative decimal lesson counts with a
+// bounded three-digit scale.  Lesson counts are supplied as strings so that
+// JSON floating-point conversion never changes the confirmed business fact.
+func validLessonDeducted(value string) bool {
+	value = strings.TrimSpace(value)
+	if !decimalLessonCount.MatchString(value) {
+		return false
+	}
+	ratio, ok := new(big.Rat).SetString(value)
+	return ok && ratio.Sign() >= 0
 }
 func (h *Handler) confirmTx(ctx context.Context, id int64, u httpserver.AuthUser, in ConfirmWrite, rid string) (err error) {
 	tx, err := h.db.BeginTx(ctx, nil)
