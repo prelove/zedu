@@ -79,6 +79,7 @@ describe('frontend negative scope: no forbidden pages or endpoints', () => {
       '/courses',
       '/finance/payments',
       '/lessons',
+      '/notifications',
       '/enrollments/:id',
     ]
 

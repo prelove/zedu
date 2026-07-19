@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/prelove/zedu/backend/internal/app/notification"
 	"github.com/prelove/zedu/backend/internal/platform/httpserver"
 	"github.com/prelove/zedu/backend/internal/repository"
 )
@@ -162,10 +163,11 @@ func (s *Service) Create(ctx context.Context, user httpserver.AuthUser, w Write,
 	if err != nil {
 		return 0, err
 	}
+	lessonNo := newLessonNo()
 	result, execErr := tx.ExecContext(ctx, `INSERT INTO lesson
 		(lesson_no,enrollment_id,assignment_id,teacher_id,student_id,scheduled_start_at,scheduled_end_at,duration_min,timezone,meeting_type,meeting_link,lesson_topic,note,created_by)
 		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		newLessonNo(), w.EnrollmentID, w.AssignmentID, teacherID, studentID, start,
+		lessonNo, w.EnrollmentID, w.AssignmentID, teacherID, studentID, start,
 		start.Add(time.Duration(w.DurationMin)*time.Minute), w.DurationMin, strings.TrimSpace(w.Timezone),
 		strings.ToUpper(strings.TrimSpace(w.MeetingType)), nullable(w.MeetingLink), nullable(w.LessonTopic), nullable(w.Note), user.UserID)
 	if execErr != nil {
@@ -177,6 +179,9 @@ func (s *Service) Create(ctx context.Context, user httpserver.AuthUser, w Write,
 	}
 	if err = writeAudit(ctx, tx, user, "LESSON_CREATE", id, map[string]any{"enrollmentId": w.EnrollmentID, "assignmentId": w.AssignmentID}, requestID); err != nil {
 		return 0, err
+	}
+	if err = notification.QueueLesson(ctx, tx, id, studentID, lessonNo, "LESSON_CREATED", start.Format(time.RFC3339), w.Timezone); err != nil {
+		return 0, repository.ErrDatabase
 	}
 	if err = tx.Commit(); err != nil {
 		return 0, repository.ErrDatabase
@@ -253,8 +258,16 @@ func (s *Service) Cancel(ctx context.Context, user httpserver.AuthUser, id int64
 	if changed != 1 {
 		return stateForLesson(ctx, tx, id)
 	}
+	var lessonNo, startUTC, timezone string
+	var studentID int64
+	if err = tx.QueryRowContext(ctx, `SELECT lesson_no, student_id, scheduled_start_at, timezone FROM lesson WHERE id=?`, id).Scan(&lessonNo, &studentID, &startUTC, &timezone); err != nil {
+		return repository.ErrDatabase
+	}
 	if err = writeAudit(ctx, tx, user, "LESSON_CANCEL", id, map[string]any{"reason": strings.TrimSpace(reason)}, requestID); err != nil {
 		return err
+	}
+	if err = notification.QueueLesson(ctx, tx, id, studentID, lessonNo, "LESSON_CANCELLED", startUTC, timezone); err != nil {
+		return repository.ErrDatabase
 	}
 	if err = tx.Commit(); err != nil {
 		return repository.ErrDatabase

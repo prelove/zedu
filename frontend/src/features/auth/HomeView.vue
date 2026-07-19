@@ -89,6 +89,9 @@ function roleLabel(role: string | null): string {
           >
             {{ t('nav.lessons') }}
           </RouterLink>
+          <RouterLink to="/notifications">
+            {{ t('nav.notifications') }}
+          </RouterLink>
           <RouterLink
             v-if="authStore.isOwner.value"
             to="/finance/config"
