@@ -40,6 +40,7 @@ func MountRoutes(mux *http.ServeMux, db *sql.DB, secret string) {
 		name, _ := repository.ActorName(tx, r.Context(), u.UserID)
 		if err = repository.InsertAuditLog(tx, r.Context(), u.UserID, name, "BACKUP_CREATE", "backup", 0, map[string]any{"file": filepath.Base(path)}, httpserver.RequestIDFromContext(r.Context())); err != nil || tx.Commit() != nil {
 			tx.Rollback()
+			_ = os.Remove(path)
 			httpserver.WriteErrorFromContext(w, r, 500, httpserver.CodeDatabase, "DATABASE_ERROR")
 			return
 		}
