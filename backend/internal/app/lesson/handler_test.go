@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prelove/zedu/backend/internal/app/attendance"
 	"github.com/prelove/zedu/backend/internal/app/lesson"
 	"github.com/prelove/zedu/backend/internal/platform/auth"
 	"github.com/prelove/zedu/backend/internal/platform/database"
@@ -39,9 +40,37 @@ func newLessonServer(t *testing.T) *lessonServer {
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	mux := httpserver.New()
 	lesson.MountRoutes(mux, lesson.NewHandler(db, logger), db, lessonTestSecret)
+	attendance.MountRoutes(mux, attendance.NewHandler(db), db, lessonTestSecret)
 	srv := httptest.NewServer(logging.NewMiddleware(logger)(mux))
 	t.Cleanup(func() { srv.Close(); _ = db.Close() })
 	return &lessonServer{db: db, srv: srv}
+}
+
+func TestLessonConfirmationCreatesAtomicFacts(t *testing.T) {
+	ts := newLessonServer(t)
+	userID := seedLessonUser(t, ts.db, "confirm-owner", "OWNER")
+	enrollmentID, assignmentID := seedActiveTeachingRelationship(t, ts.db)
+	token := lessonToken(t, userID, "OWNER")
+	status, data := lessonRequest(t, http.MethodPost, ts.srv.URL+"/lessons", token, map[string]any{"enrollmentId": enrollmentID, "assignmentId": assignmentID, "startAt": "2026-08-01T19:00:00", "durationMin": 60, "timezone": "Asia/Tokyo", "meetingType": "OFFLINE"})
+	if status != http.StatusCreated {
+		t.Fatalf("create = %d %#v", status, data)
+	}
+	id := int64(responseData(t, data)["id"].(float64))
+	status, data = lessonRequest(t, http.MethodPost, ts.srv.URL+"/lessons/"+itoa(id)+"/confirm", token, map[string]any{"outcomeType": "ATTENDED", "lessonDeducted": "1", "chargeAmount": 0, "teacherPayAmount": 0, "actualDurationMin": 60})
+	if status != http.StatusOK {
+		t.Fatalf("confirm = %d %#v", status, data)
+	}
+	assertCount(t, ts.db, "SELECT COUNT(*) FROM attendance WHERE lesson_id=?", 1, id)
+	assertCount(t, ts.db, "SELECT COUNT(*) FROM lesson_finance WHERE lesson_id=?", 1, id)
+	assertCount(t, ts.db, "SELECT COUNT(*) FROM teacher_account_ledger WHERE lesson_id=?", 1, id)
+	var lessonStatus string
+	if err := ts.db.QueryRow("SELECT status FROM lesson WHERE id=?", id).Scan(&lessonStatus); err != nil || lessonStatus != "COMPLETED" {
+		t.Fatalf("lesson status=%s err=%v", lessonStatus, err)
+	}
+	status, data = lessonRequest(t, http.MethodPost, ts.srv.URL+"/lessons/"+itoa(id)+"/confirm", token, map[string]any{"outcomeType": "ATTENDED", "lessonDeducted": "1", "chargeAmount": 0, "teacherPayAmount": 0})
+	if status != http.StatusUnprocessableEntity || responseCode(data) != 42201 {
+		t.Fatalf("duplicate = %d %#v", status, data)
+	}
 }
 
 func TestLessonLifecycleUsesOnlyLessonAndAuditFacts(t *testing.T) {
