@@ -108,6 +108,28 @@ func TestConcurrentLessonConfirmationHasOneWinner(t *testing.T) {
 	assertCount(t, ts.db, "SELECT COUNT(*) FROM attendance WHERE lesson_id=?", 1, id)
 }
 
+func TestLessonConfirmationInsufficientBalanceRollsBackAttendance(t *testing.T) {
+	ts := newLessonServer(t)
+	userID := seedLessonUser(t, ts.db, "rollback-confirm-owner", "OWNER")
+	enrollmentID, assignmentID := seedActiveTeachingRelationship(t, ts.db)
+	token := lessonToken(t, userID, "OWNER")
+	status, data := lessonRequest(t, http.MethodPost, ts.srv.URL+"/lessons", token, map[string]any{"enrollmentId": enrollmentID, "assignmentId": assignmentID, "startAt": "2026-08-01T19:00:00", "durationMin": 60, "timezone": "Asia/Tokyo", "meetingType": "OFFLINE"})
+	if status != http.StatusCreated {
+		t.Fatalf("create = %d %#v", status, data)
+	}
+	id := int64(responseData(t, data)["id"].(float64))
+	status, data = lessonRequest(t, http.MethodPost, ts.srv.URL+"/lessons/"+itoa(id)+"/confirm", token, map[string]any{"outcomeType": "ATTENDED", "lessonDeducted": "1", "chargeAmount": 1, "teacherPayAmount": 0})
+	if status != http.StatusUnprocessableEntity || responseCode(data) != 42201 {
+		t.Fatalf("confirmation = %d %#v", status, data)
+	}
+	assertCount(t, ts.db, "SELECT COUNT(*) FROM attendance WHERE lesson_id=?", 0, id)
+	assertCount(t, ts.db, "SELECT COUNT(*) FROM lesson_finance WHERE lesson_id=?", 0, id)
+	var lessonStatus string
+	if err := ts.db.QueryRow("SELECT status FROM lesson WHERE id=?", id).Scan(&lessonStatus); err != nil || lessonStatus != "SCHEDULED" {
+		t.Fatalf("lesson status=%s err=%v", lessonStatus, err)
+	}
+}
+
 func TestLessonLifecycleUsesOnlyLessonAndAuditFacts(t *testing.T) {
 	ts := newLessonServer(t)
 	userID := seedLessonUser(t, ts.db, "owner", "OWNER")
