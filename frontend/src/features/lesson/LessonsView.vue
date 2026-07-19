@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { cancelLesson, confirmLesson, createLesson, listLessons, type Lesson, type LessonWrite } from '../../api/lesson'
+import { cancelLesson, confirmLesson, listAttendanceOutcomes, listLessons, type Lesson, type LessonWrite } from '../../api/lesson'
 import { errorToI18nKey } from '../../api/error-mapping'
 import ErrorState from '../../components/ErrorState.vue'
 import LoadingState from '../../components/LoadingState.vue'
@@ -75,7 +75,8 @@ async function cancel(item: Lesson): Promise<void> {
 }
 
 async function confirm(item: Lesson): Promise<void> {
-  const outcomeType = window.prompt('Attendance outcome', 'ATTENDED')
+  const outcomes = await authStore.authedRequest((token) => listAttendanceOutcomes(token))
+  const outcomeType = window.prompt(`Attendance outcome (${outcomes.map((outcome) => outcome.code).join(', ')})`, outcomes[0]?.code ?? '')
   if (!outcomeType) return
   try {
     await authStore.authedRequest((token) => confirmLesson(token, item.id, { outcomeType, lessonDeducted: '1', chargeAmount: 0, teacherPayAmount: 0, actualDurationMin: item.durationMin }))

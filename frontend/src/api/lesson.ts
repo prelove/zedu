@@ -73,6 +73,8 @@ export function cancelLesson(token: string, id: number, reason: string): Promise
 }
 
 export interface LessonConfirmation { outcomeType: string; lessonDeducted: string; chargeAmount: number; teacherPayAmount: number; actualDurationMin?: number; note?: string }
+export interface AttendanceOutcome { code:string; name:string; suggestedLessonDeducted:string; suggestedChargeRatio:string; suggestedTeacherPayRatio:string }
+export function listAttendanceOutcomes(token:string): Promise<AttendanceOutcome[]> { return httpRequest<AttendanceOutcome[]>('/system/attendance-outcomes',{token}).then((response)=>response.data) }
 export function confirmLesson(token: string, id: number, body: LessonConfirmation): Promise<{ lessonId: number }> {
   return httpRequest<{ lessonId: number }>(`/lessons/${id}/confirm`, { method: 'POST', body, token }).then((response) => response.data)
 }

@@ -26,7 +26,30 @@ type Handler struct{ db repository.DB }
 
 func NewHandler(db any) *Handler { return &Handler{repository.AsDB(db)} }
 func MountRoutes(mux *http.ServeMux, h *Handler, db *sql.DB, secret string) {
+	mux.Handle("GET /system/attendance-outcomes", httpserver.AuthMiddleware(secret, db)(http.HandlerFunc(h.listOutcomes)))
 	mux.Handle("POST /lessons/{id}/confirm", httpserver.AuthMiddleware(secret, db)(http.HandlerFunc(h.confirm)))
+}
+func (h *Handler) listOutcomes(w http.ResponseWriter, r *http.Request) {
+	rows, err := h.db.QueryContext(r.Context(), `SELECT code,name,coalesce(suggested_lesson_deducted,''),coalesce(suggested_charge_ratio,''),coalesce(suggested_teacher_pay_ratio,'') FROM attendance_outcome_type WHERE enabled=1 ORDER BY code`)
+	if err != nil {
+		httpserver.WriteErrorFromContext(w, r, 500, httpserver.CodeDatabase, "DATABASE_ERROR")
+		return
+	}
+	defer rows.Close()
+	items := make([]map[string]string, 0)
+	for rows.Next() {
+		var code, name, deducted, charge, pay string
+		if err = rows.Scan(&code, &name, &deducted, &charge, &pay); err != nil {
+			httpserver.WriteErrorFromContext(w, r, 500, httpserver.CodeDatabase, "DATABASE_ERROR")
+			return
+		}
+		items = append(items, map[string]string{"code": code, "name": name, "suggestedLessonDeducted": deducted, "suggestedChargeRatio": charge, "suggestedTeacherPayRatio": pay})
+	}
+	if err = rows.Err(); err != nil {
+		httpserver.WriteErrorFromContext(w, r, 500, httpserver.CodeDatabase, "DATABASE_ERROR")
+		return
+	}
+	httpserver.WriteSuccess(w, 200, items)
 }
 func (h *Handler) confirm(w http.ResponseWriter, r *http.Request) {
 	u, _ := httpserver.UserFromContext(r.Context())
