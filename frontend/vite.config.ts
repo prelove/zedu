@@ -56,6 +56,14 @@ export default defineConfig({
         target: 'http://localhost:8080',
         changeOrigin: true,
       },
+      '/system': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+      },
+      '/finance': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+      },
     },
   },
 })

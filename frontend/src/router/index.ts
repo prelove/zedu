@@ -53,6 +53,18 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: true },
   },
   {
+    path: '/finance/config',
+    name: 'finance-config',
+    component: () => import('../features/finance/FinanceConfigView.vue'),
+    meta: { requiresAuth: true, requiresOwner: true },
+  },
+  {
+    path: '/finance/payments',
+    name: 'finance-payments',
+    component: () => import('../features/finance/FinancePaymentsView.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
     path: '/enrollments/:id',
     name: 'enrollment-detail',
     component: () => import('../features/course/EnrollmentDetailView.vue'),

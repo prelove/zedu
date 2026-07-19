@@ -2,20 +2,10 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync, readdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
-/**
- * Negative-scope test: ensure no frontend source or test file references
- * forbidden capabilities — lesson, attendance, payment, notification, backup,
- * report, payout, settlement — or student/teacher/parent login pages.
- *
- * M2-KIMI-02 allows students, teachers, parents, enrollments, assignments,
- * course-domains, tracks, levels, and capability-tags paths.
- */
-describe('M2-KIMI-02 negative scope: no forbidden pages or endpoints', () => {
-  // Forbidden patterns: capabilities NOT in M2-KIMI-02 scope.
+describe('frontend negative scope: no forbidden pages or endpoints', () => {
   const forbiddenPatterns = [
     /\/lesson/,
     /\/attendance/,
-    /\/payment/,
     /\/notification/,
     /\/backup/,
     /\/report/,
@@ -45,11 +35,11 @@ describe('M2-KIMI-02 negative scope: no forbidden pages or endpoints', () => {
     for (const file of files) {
       const content = readFileSync(file, 'utf-8')
       for (const pattern of forbiddenPatterns) {
-        // Check for route registration patterns like path: '/lesson' or
-        // API call patterns like fetch('/lesson') or httpRequest('/lesson')
-        if (content.includes(`path: '${pattern.source}'`) ||
-            content.includes(`fetch('${pattern.source}'`) ||
-            content.includes(`httpRequest('${pattern.source}'`)) {
+        if (
+          content.includes(`path: '${pattern.source}'`) ||
+          content.includes(`fetch('${pattern.source}'`) ||
+          content.includes(`httpRequest('${pattern.source}'`)
+        ) {
           violations.push(`${file}: matches ${pattern.source}`)
         }
       }
@@ -64,8 +54,10 @@ describe('M2-KIMI-02 negative scope: no forbidden pages or endpoints', () => {
       if (file.endsWith('negative-scope.test.ts')) continue
       const content = readFileSync(file, 'utf-8')
       for (const pattern of forbiddenPatterns) {
-        if (content.includes(`fetch('${pattern.source}'`) ||
-            content.includes(`httpRequest('${pattern.source}'`)) {
+        if (
+          content.includes(`fetch('${pattern.source}'`) ||
+          content.includes(`httpRequest('${pattern.source}'`)
+        ) {
           violations.push(`${file}: requests ${pattern.source}`)
         }
       }
@@ -76,8 +68,7 @@ describe('M2-KIMI-02 negative scope: no forbidden pages or endpoints', () => {
   it('router defines only approved routes', () => {
     const routerContent = readFileSync(resolve(srcDir, 'router', 'index.ts'), 'utf-8')
     const pathMatches = routerContent.match(/path:\s*'[^']+'/g) ?? []
-    const paths = pathMatches.map((m) => m.match(/'([^']+)'/)?.[1] ?? '')
-    // Approved routes for M2-KIMI-01 + M2-KIMI-02.
+    const paths = pathMatches.map((match) => match.match(/'([^']+)'/)?.[1] ?? '')
     const approved = [
       '/login',
       '/',
@@ -87,15 +78,17 @@ describe('M2-KIMI-02 negative scope: no forbidden pages or endpoints', () => {
       '/teachers',
       '/teachers/:id',
       '/courses',
+      '/finance/payments',
       '/enrollments/:id',
     ]
-    for (const p of approved) {
-      expect(paths).toContain(p)
+
+    for (const path of approved) {
+      expect(paths).toContain(path)
     }
-    // No forbidden routes (lesson, attendance, payment, etc.).
-    for (const p of paths) {
+
+    for (const path of paths) {
       for (const pattern of forbiddenPatterns) {
-        expect(p, `route ${p} matches forbidden pattern ${pattern.source}`).not.toMatch(pattern)
+        expect(path, `route ${path} matches forbidden pattern ${pattern.source}`).not.toMatch(pattern)
       }
     }
   })

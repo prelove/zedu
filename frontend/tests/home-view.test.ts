@@ -32,6 +32,7 @@ describe('HomeView', () => {
         { path: '/students', component: { template: '<div />' } },
         { path: '/teachers', component: { template: '<div />' } },
         { path: '/courses', component: { template: '<div />' } },
+        { path: '/finance/payments', component: { template: '<div />' } },
         { path: '/onboarding', component: { template: '<div />' } },
       ],
     })
