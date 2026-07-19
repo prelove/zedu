@@ -272,7 +272,7 @@ func seedEvidencePayment(t *testing.T, db *sql.DB) int64 {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err = db.Exec(`INSERT INTO student_payment (payment_no, student_id, enrollment_id, original_amount, original_currency, fx_rate_to_base, amount_base, lessons_added, payment_method_code, paid_at, status) VALUES (?, ?, ?, '1000', 'JPY', '1', 1000, 1, 'CASH', '2026-07-19T00:00:00Z', 'CONFIRMED')`, "pay-"+time.Now().Format("20060102150405.000000000"), studentID, enrollmentID)
+	result, err = db.Exec(`INSERT INTO student_payment (payment_no, student_id, enrollment_id, original_amount, original_currency, fx_rate_to_base, amount_base, lessons_added, payment_method_code, payment_method_name, paid_at, status) VALUES (?, ?, ?, '1000', 'JPY', '1', 1000, 1, 'CASH', 'Cash', '2026-07-19T00:00:00Z', 'CONFIRMED')`, "pay-"+time.Now().Format("20060102150405.000000000"), studentID, enrollmentID)
 	if err != nil {
 		t.Fatal(err)
 	}
