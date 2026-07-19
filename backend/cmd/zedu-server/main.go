@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/prelove/zedu/backend/internal/app/attendance"
 	appauth "github.com/prelove/zedu/backend/internal/app/auth"
 	"github.com/prelove/zedu/backend/internal/app/course"
 	"github.com/prelove/zedu/backend/internal/app/directory"
@@ -61,6 +62,7 @@ func main() {
 	directory.MountRoutes(mux, directory.NewHandler(db, logger), db, jwtSecret)
 	course.MountRoutes(mux, course.NewHandler(db, logger), db, jwtSecret)
 	lesson.MountRoutes(mux, lesson.NewHandler(db, logger), db, jwtSecret)
+	attendance.MountRoutes(mux, attendance.NewHandler(db), db, jwtSecret)
 	var notificationSender notification.Sender
 	if sender, err := notification.NewResendSenderFromEnv(); err == nil {
 		notificationSender = sender

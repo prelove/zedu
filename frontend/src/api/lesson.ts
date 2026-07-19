@@ -71,3 +71,8 @@ export function updateLesson(token: string, id: number, body: LessonUpdate): Pro
 export function cancelLesson(token: string, id: number, reason: string): Promise<Lesson> {
   return httpRequest<Lesson>(`/lessons/${id}/cancel`, { method: 'POST', body: { reason }, token }).then((response) => response.data)
 }
+
+export interface LessonConfirmation { outcomeType: string; lessonDeducted: string; chargeAmount: number; teacherPayAmount: number; actualDurationMin?: number; note?: string }
+export function confirmLesson(token: string, id: number, body: LessonConfirmation): Promise<{ lessonId: number }> {
+  return httpRequest<{ lessonId: number }>(`/lessons/${id}/confirm`, { method: 'POST', body, token }).then((response) => response.data)
+}
