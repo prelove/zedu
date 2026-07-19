@@ -389,3 +389,8 @@ Object.assign(((enUS as Record<string, unknown>).financePayments ??= {}) as obje
   statusConfirmed: 'Confirmed',
   statusVoided: 'Voided',
 })
+
+Object.assign(((enUS as Record<string, unknown>).nav ??= {}) as object, { lessons: 'Lessons' })
+Object.assign(((enUS as Record<string, unknown>).lessons ??= {}) as object, {
+  title: 'Lesson scheduling', enrollmentId: 'Enrollment ID', assignmentId: 'Assignment ID', startAt: 'Start time', duration: 'Duration (minutes)', timezone: 'Timezone', meetingType: 'Meeting type', meetingLink: 'Meeting link', topic: 'Topic', create: 'Schedule lesson', status: 'Status', scheduled: 'Scheduled', completed: 'Completed', cancelled: 'Cancelled', cancel: 'Cancel lesson', cancelReason: 'Cancellation reason', empty: 'No lessons found.', offline: 'Offline',
+})

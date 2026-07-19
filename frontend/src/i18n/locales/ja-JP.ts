@@ -383,6 +383,11 @@ export const jaJP: LocaleSchema = {
   emptyLedger: '受講生台帳はまだありません。',
 } as const
 
+Object.assign(((jaJP as Record<string, unknown>).nav ??= {}) as object, { lessons: 'レッスン' })
+Object.assign(((jaJP as Record<string, unknown>).lessons ??= {}) as object, {
+  title: 'レッスン予定', enrollmentId: '受講ID', assignmentId: '担当ID', startAt: '開始時刻', duration: '時間（分）', timezone: 'タイムゾーン', meetingType: '形式', meetingLink: '会議リンク', topic: 'テーマ', create: 'レッスンを作成', status: '状態', scheduled: '予定', completed: '完了', cancelled: 'キャンセル済み', cancel: 'キャンセル', cancelReason: 'キャンセル理由', empty: 'レッスンはありません。', offline: '対面',
+})
+
 Object.assign(((jaJP as Record<string, unknown>).financePayments ??= {}) as object, {
   filterStatus: '状態',
   statusAll: 'すべての状態',

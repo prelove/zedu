@@ -4,7 +4,6 @@ import { join, resolve } from 'node:path'
 
 describe('frontend negative scope: no forbidden pages or endpoints', () => {
   const forbiddenPatterns = [
-    /\/lesson/,
     /\/attendance/,
     /\/notification/,
     /\/backup/,
@@ -79,6 +78,7 @@ describe('frontend negative scope: no forbidden pages or endpoints', () => {
       '/teachers/:id',
       '/courses',
       '/finance/payments',
+      '/lessons',
       '/enrollments/:id',
     ]
 

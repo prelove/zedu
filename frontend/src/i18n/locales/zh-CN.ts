@@ -389,3 +389,8 @@ Object.assign(((zhCN as Record<string, unknown>).financePayments ??= {}) as obje
 } as const
 
 export type LocaleSchema = typeof zhCN
+
+Object.assign(((zhCN as Record<string, unknown>).nav ??= {}) as object, { lessons: '课程安排' })
+Object.assign(((zhCN as Record<string, unknown>).lessons ??= {}) as object, {
+  title: '课程安排', enrollmentId: '报名编号', assignmentId: '师生安排编号', startAt: '开始时间', duration: '时长（分钟）', timezone: '时区', meetingType: '上课方式', meetingLink: '会议链接', topic: '课程主题', create: '创建课程', status: '状态', scheduled: '已排课', completed: '已完成', cancelled: '已取消', cancel: '取消课程', cancelReason: '取消原因', empty: '暂无课程。', offline: '线下',
+})

@@ -14,6 +14,7 @@ import (
 	"github.com/prelove/zedu/backend/internal/app/directory"
 	"github.com/prelove/zedu/backend/internal/app/evidence"
 	"github.com/prelove/zedu/backend/internal/app/finance"
+	"github.com/prelove/zedu/backend/internal/app/lesson"
 	"github.com/prelove/zedu/backend/internal/app/onboarding"
 	"github.com/prelove/zedu/backend/internal/platform/auth"
 	"github.com/prelove/zedu/backend/internal/platform/database"
@@ -58,6 +59,7 @@ func main() {
 	onboarding.MountRoutes(mux, onboarding.NewHandler(db, logger), db, jwtSecret)
 	directory.MountRoutes(mux, directory.NewHandler(db, logger), db, jwtSecret)
 	course.MountRoutes(mux, course.NewHandler(db, logger), db, jwtSecret)
+	lesson.MountRoutes(mux, lesson.NewHandler(db, logger), db, jwtSecret)
 	finance.MountRoutes(mux, finance.NewHandler(db, logger), db, jwtSecret)
 	evidence.MountRoutes(mux, evidence.NewHandler(db, logger, evidence.Config{DataRoot: os.Getenv("ZEDU_DATA_ROOT")}), db, jwtSecret)
 	handler := logging.NewMiddleware(logger)(mux)
