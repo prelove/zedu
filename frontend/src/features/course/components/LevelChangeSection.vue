@@ -12,15 +12,17 @@ const emit = defineEmits<{ saved: [enrollment: Enrollment]; retryDict: [] }>()
 const { t } = useI18n()
 
 const selCurrentLevel = ref(0)
+const effectiveCurrentLevel = ref(0)
 const saving = ref(false)
 const saveError = ref<string | null>(null)
 const sameLevelRejected = ref(false)
 
 const filteredLevels = computed(() => props.levels.filter((l) => l.trackId === props.enrollment.trackId))
 
-watch(() => props.enrollment, (e) => {
-  if (!e) return
+watch(() => props.enrollment.id, () => {
+  const e = props.enrollment
   selCurrentLevel.value = e.currentLevelId ?? 0
+  effectiveCurrentLevel.value = e.currentLevelId ?? 0
   sameLevelRejected.value = false
 }, { immediate: true })
 
@@ -29,8 +31,9 @@ async function handleSave(): Promise<void> {
   saveError.value = null
   sameLevelRejected.value = false
 
-  // Same-level rejection: compare against the enrollment's current level.
-  if (selCurrentLevel.value === (props.enrollment.currentLevelId ?? 0)) {
+  // The enrollment row keeps its initial-level snapshot. Later level changes
+  // are represented by events, so retain this page's effective level locally.
+  if (selCurrentLevel.value === effectiveCurrentLevel.value) {
     sameLevelRejected.value = true
     saving.value = false
     return
@@ -42,6 +45,7 @@ async function handleSave(): Promise<void> {
 
   try {
     const updated = await authStore.authedRequest((token) => updateEnrollment(token, props.enrollment.id, body))
+    effectiveCurrentLevel.value = selCurrentLevel.value
     emit('saved', updated)
   } catch (err) {
     if (err instanceof NetworkError) saveError.value = 'errors.NETWORK_ERROR'

@@ -158,7 +158,7 @@ func (r *Repository) ListDomains(ctx context.Context, exec repository.Executor, 
 		return nil, 0, err
 	}
 	defer rows.Close()
-	var out []CourseDomain
+	out := make([]CourseDomain, 0)
 	for rows.Next() {
 		var d CourseDomain
 		var enabled int
@@ -264,7 +264,7 @@ func (r *Repository) ListTracks(ctx context.Context, exec repository.Executor, d
 		return nil, 0, err
 	}
 	defer rows.Close()
-	var out []Track
+	out := make([]Track, 0)
 	for rows.Next() {
 		var t Track
 		var enabled int
@@ -370,7 +370,7 @@ func (r *Repository) ListLevels(ctx context.Context, exec repository.Executor, t
 		return nil, 0, err
 	}
 	defer rows.Close()
-	var out []Level
+	out := make([]Level, 0)
 	for rows.Next() {
 		var l Level
 		var enabled int
@@ -490,7 +490,7 @@ func (r *Repository) ListTags(ctx context.Context, exec repository.Executor, dom
 		return nil, 0, err
 	}
 	defer rows.Close()
-	var out []CapabilityTag
+	out := make([]CapabilityTag, 0)
 	for rows.Next() {
 		var t CapabilityTag
 		var enabled int

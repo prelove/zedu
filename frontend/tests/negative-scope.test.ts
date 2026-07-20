@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path'
 describe('frontend negative scope: no forbidden pages or endpoints', () => {
   const forbiddenPatterns = [
     /\/attendance/,
-    /\/notification/,
+    /\/notification(?!s)/,
     /\/backup/,
     /\/report/,
     /\/payout/,

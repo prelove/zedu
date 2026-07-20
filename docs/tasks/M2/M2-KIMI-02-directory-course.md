@@ -4,7 +4,7 @@
 
 | 项目 | 内容 |
 |---|---|
-| 状态 | READY |
+| 状态 | IN_REVIEW |
 | Owner | Kimi |
 | 基线 | `main` 的 `57d08f5`（M2 后端核心 API 与 M2-KIMI-01 已验收） |
 | OpenSpec | `add-m2-core-management` 任务 4.1、4.2；`people-directory`、`course-enrollment-assignment` specs |

@@ -464,4 +464,53 @@ describe('EnrollmentDetailView', () => {
     await wrapper.find('[data-testid="confirm-cancel"]').trigger('click')
     expect(wrapper.find('[data-testid="confirm-dialog"]').exists()).toBe(false)
   })
+
+  it('shows teacher load error, disables assignment creation, and retries successfully', async () => {
+    let teacherAttempts = 0
+    globalThis.fetch = vi.fn().mockImplementation((url: string, opts: any) => {
+      const m = opts?.method
+      if (url.startsWith('/enrollments/5') && !url.includes('/assignments')) {
+        return Promise.resolve(mockResponse({ code: 0, data: { id: 5, studentId: 10, domainId: 1, trackId: 1, currentLevelId: 1, targetLevelId: 2, enrollmentType: 'REGULAR', status: 'ACTIVE', createdAt: '', updatedAt: '' } }))
+      }
+      if (url.startsWith('/enrollments/5/assignments')) {
+        return Promise.resolve(mockResponse({ code: 0, data: { items: [], page: 1, pageSize: 20, total: 0 } }))
+      }
+      if (url.startsWith('/course-domains')) {
+        return Promise.resolve(mockResponse({ code: 0, data: { items: [{ id: 1, name: 'JP', code: 'jp', type: 'L', sortOrder: 0, enabled: true, createdAt: '', updatedAt: '' }], page: 1, pageSize: 20, total: 1 } }))
+      }
+      if (url.startsWith('/tracks')) {
+        return Promise.resolve(mockResponse({ code: 0, data: { items: [{ id: 1, domainId: 1, name: 'Nihongo', code: 'n1', sortOrder: 0, enabled: true, createdAt: '', updatedAt: '' }], page: 1, pageSize: 20, total: 1 } }))
+      }
+      if (url.startsWith('/levels')) {
+        return Promise.resolve(mockResponse({ code: 0, data: { items: [
+          { id: 1, trackId: 1, name: 'N5', code: 'n5', sortOrder: 0, enabled: true, createdAt: '', updatedAt: '' },
+          { id: 2, trackId: 1, name: 'N4', code: 'n4', sortOrder: 1, enabled: true, createdAt: '', updatedAt: '' },
+        ], page: 1, pageSize: 20, total: 2 } }))
+      }
+      if (url.startsWith('/teachers') && m !== 'POST') {
+        teacherAttempts += 1
+        if (teacherAttempts === 1) {
+          return Promise.resolve(mockResponse({ code: 50001, message: 'INTERNAL_ERROR', requestId: 'teachers-r1' }, 500))
+        }
+        return Promise.resolve(mockResponse({ code: 0, data: { items: [{ id: 3, name: 'Sensei', defaultRate: 0, status: 'ACTIVE', createdAt: '', updatedAt: '' }], page: 1, pageSize: 20, total: 1 } }))
+      }
+      return Promise.resolve(mockResponse({ code: 0, data: { items: [], page: 1, pageSize: 20, total: 0 } }))
+    })
+
+    const wrapper = mount(EnrollmentDetailView, {
+      props: { id: '5' },
+      global: { plugins: [testI18n(), testRouter()] },
+    })
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="teacher-load-error"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="add-assignment-btn"]').attributes('disabled')).toBeDefined()
+
+    await wrapper.find('[data-testid="teacher-load-retry"]').trigger('click')
+    await flushPromises()
+
+    expect(teacherAttempts).toBe(2)
+    expect(wrapper.find('[data-testid="teacher-load-error"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="add-assignment-btn"]').attributes('disabled')).toBeUndefined()
+  })
 })

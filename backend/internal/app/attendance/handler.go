@@ -128,7 +128,7 @@ func (h *Handler) confirmTx(ctx context.Context, id int64, u httpserver.AuthUser
 	if _, err = tx.ExecContext(ctx, `UPDATE student_course_enrollment SET balance_amount=balance_amount-?,lesson_balance=lesson_balance-CAST(? AS REAL),updated_at=CURRENT_TIMESTAMP WHERE id=?`, in.ChargeAmount, in.LessonDeducted, enroll); err != nil {
 		return repository.ErrDatabase
 	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO student_account_ledger(student_id,enrollment_id,biz_type,amount_delta,lesson_delta,balance_after,lesson_balance_after,operator_id,note) VALUES(?,?,'LESSON_CONFIRM',?,CAST(? AS REAL),?,CAST(? AS REAL),?,?)`, student, enroll, -in.ChargeAmount, "-"+in.LessonDeducted, bal-in.ChargeAmount, lessons, u.UserID, in.Note); err != nil {
+	if _, err = tx.ExecContext(ctx, `INSERT INTO student_account_ledger(student_id,enrollment_id,biz_type,amount_delta,lesson_delta,balance_after,lesson_balance_after,operator_id,note) VALUES(?,?,'LESSON_CONFIRM',?, -CAST(? AS REAL), ?, CAST(? AS REAL)-CAST(? AS REAL), ?, ?)`, student, enroll, -in.ChargeAmount, in.LessonDeducted, bal-in.ChargeAmount, lessons, in.LessonDeducted, u.UserID, in.Note); err != nil {
 		return repository.ErrDatabase
 	}
 	if _, err = tx.ExecContext(ctx, `INSERT INTO teacher_account_ledger(teacher_id,lesson_id,amount_delta,balance_after,operator_id,note) VALUES(?,?,?,COALESCE((SELECT balance_after FROM teacher_account_ledger WHERE teacher_id=? ORDER BY id DESC LIMIT 1),0)+?,?,?)`, teacher, id, in.TeacherPayAmount, teacher, in.TeacherPayAmount, u.UserID, in.Note); err != nil {

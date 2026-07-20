@@ -4,22 +4,28 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"path/filepath"
+	"testing"
+
 	"github.com/prelove/zedu/backend/internal/app/notification"
 	"github.com/prelove/zedu/backend/internal/platform/database"
 	"github.com/prelove/zedu/backend/internal/repository"
-	"path/filepath"
-	"testing"
 )
 
 type fakeSender struct {
-	calls int
-	fail  bool
+	calls   int
+	fail    bool
+	leakMsg string
 }
 
 func (s *fakeSender) Send(_ context.Context, _, _, _ string) (string, error) {
 	s.calls++
 	if s.fail {
-		return "", errors.New("provider unavailable")
+		msg := "provider unavailable"
+		if s.leakMsg != "" {
+			msg = s.leakMsg
+		}
+		return "", errors.New(msg)
 	}
 	return "re_123", nil
 }

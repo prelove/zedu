@@ -67,6 +67,23 @@ func TestListEnrollmentsEmptyReturnsEmptyArrayNotNull(t *testing.T) {
 	}
 }
 
+func TestEmptyCourseReferenceListsReturnEmptyArrays(t *testing.T) {
+	ts := newTestServer(t)
+	tok := ownerToken(t, ts)
+	for _, path := range []string{"/course-domains", "/tracks", "/levels", "/capability-tags"} {
+		t.Run(path, func(t *testing.T) {
+			status, body := req(t, "GET", ts.srv.URL+path, tok, nil)
+			if status != http.StatusOK {
+				t.Fatalf("expected 200, got %d body=%v", status, body)
+			}
+			items, ok := dataMap(t, body)["items"].([]any)
+			if !ok || items == nil || len(items) != 0 {
+				t.Fatalf("expected non-nil empty items array, got %#v", dataMap(t, body)["items"])
+			}
+		})
+	}
+}
+
 func TestListAssignmentsReturnsPaginationEnvelope(t *testing.T) {
 	ts := newTestServer(t)
 	tok := ownerToken(t, ts)

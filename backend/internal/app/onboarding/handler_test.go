@@ -180,11 +180,12 @@ func TestOwnerInitializesBlankAndK12Templates(t *testing.T) {
 func TestInitializeRejectsUnknownTemplateWithoutSideEffects(t *testing.T) {
 	ts := newTestServer(t)
 	ownerID := createUser(t, ts.db, "owner", "OWNER")
+	settingsBefore := countRows(t, ts.db, "system_settings")
 	status, body := request(t, http.MethodPost, ts.srv.URL+"/onboarding/initialize", tokenFor(t, ownerID, "OWNER"), map[string]string{"template": "surprise"})
 	if status != http.StatusUnprocessableEntity || body["code"] != float64(httpserver.CodeInvalidState) {
 		t.Fatalf("invalid template status=%d body=%v", status, body)
 	}
-	if countRows(t, ts.db, "course_domain") != 0 || countRows(t, ts.db, "system_settings") != 0 || countRows(t, ts.db, "operation_log") != 0 {
+	if countRows(t, ts.db, "course_domain") != 0 || countRows(t, ts.db, "system_settings") != settingsBefore || countRows(t, ts.db, "operation_log") != 0 {
 		t.Fatalf("invalid template left side effects")
 	}
 }
@@ -272,6 +273,7 @@ func TestResetReplacesTemplateAndWritesAuditableFact(t *testing.T) {
 func TestInitializeRollsBackWhenAuditWriteFails(t *testing.T) {
 	ts := newTestServer(t)
 	ownerID := createUser(t, ts.db, "owner", "OWNER")
+	settingsBefore := countRows(t, ts.db, "system_settings")
 	if _, err := ts.db.Exec(`CREATE TRIGGER fail_onboarding_audit BEFORE INSERT ON operation_log
 		WHEN NEW.action = 'ONBOARDING_INITIALIZE'
 		BEGIN SELECT RAISE(ABORT, 'injected audit failure'); END`); err != nil {
@@ -282,10 +284,13 @@ func TestInitializeRollsBackWhenAuditWriteFails(t *testing.T) {
 	if status != http.StatusInternalServerError || body["code"] != float64(httpserver.CodeDatabase) || body["message"] != "DATABASE_ERROR" {
 		t.Fatalf("fault status=%d body=%v", status, body)
 	}
-	for _, table := range []string{"course_domain", "course_track", "course_level", "skill_tag", "operation_log", "system_settings"} {
+	for _, table := range []string{"course_domain", "course_track", "course_level", "skill_tag", "operation_log"} {
 		if got := countRows(t, ts.db, table); got != 0 {
 			t.Fatalf("%s rows after rollback = %d, want 0", table, got)
 		}
+	}
+	if got := countRows(t, ts.db, "system_settings"); got != settingsBefore {
+		t.Fatalf("system_settings rows after rollback = %d, want baseline %d", got, settingsBefore)
 	}
 }
 

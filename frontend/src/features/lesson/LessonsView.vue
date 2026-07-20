@@ -255,7 +255,7 @@ onMounted(() => { void load() })
           v-model="confirmationForm.lessonDeducted"
           data-testid="lesson-confirm-deducted"
           inputmode="decimal"
-          pattern="\\d+(\\.\\d{1,3})?"
+          pattern="\d+(\.\d{1,3})?"
           required
         ></label>
         <label>{{ t('lessons.chargeAmount') }}<input
@@ -279,12 +279,16 @@ onMounted(() => { void load() })
           <button
             type="button"
             @click="confirmationTarget = null"
-          >{{ t('common.cancel') }}</button>
+          >
+            {{ t('common.cancel') }}
+          </button>
           <button
             type="submit"
             data-testid="lesson-confirm-submit"
             :disabled="submitting"
-          >{{ submitting ? t('common.saving') : t('lessons.confirm') }}</button>
+          >
+            {{ submitting ? t('common.saving') : t('lessons.confirm') }}
+          </button>
         </div>
       </form>
     </section>

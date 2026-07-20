@@ -332,13 +332,6 @@ export const zhCN = {
   },
 } as const
 
-Object.assign(((zhCN as Record<string, unknown>).financePayments ??= {}) as object, {
-  filterStatus: '状态',
-  statusAll: '全部状态',
-  statusConfirmed: '已确认',
-  statusVoided: '已作废',
-})
-
 ;(zhCN.nav as Record<string, string>).financePayments = '充值记录'
 ;(zhCN as Record<string, unknown>).financePayments = {
   title: '充值管理',
@@ -388,6 +381,13 @@ Object.assign(((zhCN as Record<string, unknown>).financePayments ??= {}) as obje
   emptyLedger: '暂无学员流水。',
 } as const
 
+Object.assign(((zhCN as Record<string, unknown>).financePayments ??= {}) as object, {
+  filterStatus: '状态',
+  statusAll: '全部状态',
+  statusConfirmed: '已确认',
+  statusVoided: '已作废',
+})
+
 export type LocaleSchema = typeof zhCN
 
 Object.assign(((zhCN as Record<string, unknown>).nav ??= {}) as object, { lessons: '课程安排' })
@@ -397,5 +397,6 @@ Object.assign(((zhCN as Record<string, unknown>).lessons ??= {}) as object, {
 
 Object.assign(((zhCN as Record<string, unknown>).lessons ??= {}) as object, { confirm: '确认课后记录', confirmTitle: '确认课程完成', outcome: '出勤结果', actualDuration: '实际时长（分钟）', lessonDeducted: '扣除课时', chargeAmount: '扣费金额（本位币）', teacherPayAmount: '教师应付金额（本位币）' })
 Object.assign(((zhCN as Record<string, unknown>).nav ??= {}) as object, { dashboard: '工作台', notifications: '通知' })
-Object.assign(((zhCN as Record<string, unknown>).dashboard ??= {}) as object, { title: '工作台', loadError: '无法加载运营数据。', pendingConfirmations: '待确认课程：{count}', failedNotifications: '发送失败通知：{count}', createBackup: '创建备份', backupCreated: '备份文件：{file}' })
-Object.assign(((zhCN as Record<string, unknown>).notifications ??= {}) as object, { title: '通知', process: '处理发件箱', event: '事件', status: '状态', retry: '重试' })
+Object.assign(((zhCN as Record<string, unknown>).dashboard ??= {}) as object, { title: '工作台', loadError: '无法加载运营数据。', todayLessons: '今日课程：{count}', pendingConfirmations: '待确认课程：{count}', renewalNeeded: '待续费学员：{count}', teacherPayable: '老师应付总额（本位币）：{amount}', failedNotifications: '发送失败通知：{count}', createBackup: '创建备份', backupCreating: '备份中…', backupCreated: '备份文件：{file}', backupError: '备份创建失败，请稍后再试。' })
+Object.assign(((zhCN as Record<string, unknown>).notifications ??= {}) as object, { title: '通知', process: '处理发件箱', event: '事件', status: '状态', retry: '重试', reminder: '课前提醒', failed: '发送失败', sent: '已发送', pending: '待发送', manualRetryHint: '失败通知可点击重试；超过三次上限的失败需人工排查后重放。' })
+Object.assign(((zhCN as Record<string, unknown>).teachers ??= {}) as object, { payableTitle: '老师应付（只读）', payableHint: '按已确认课次生成，仅查询不结款。', payableEmpty: '暂无应付记录', payableLessonNo: '课次编号', payableAmount: '应付金额', payableBalanceAfter: '累计余额', payableCreatedAt: '记录时间' })

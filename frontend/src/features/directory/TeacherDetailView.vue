@@ -9,6 +9,7 @@ import ErrorState from '../../components/ErrorState.vue'
 import TeacherEditForm from './components/TeacherEditForm.vue'
 import CapabilitiesSection from './components/CapabilitiesSection.vue'
 import AvailabilitySection from './components/AvailabilitySection.vue'
+import PayableSection from './components/PayableSection.vue'
 import { useDictionary } from '../../composables/useDictionary'
 
 const props = defineProps<{ id: string }>()
@@ -100,6 +101,8 @@ function onSaved(updated: Teacher): void {
       />
 
       <AvailabilitySection :teacher-id="teacherId()" />
+
+      <PayableSection :teacher-id="teacherId()" />
     </template>
   </div>
 </template>

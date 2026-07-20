@@ -15,6 +15,17 @@
 
 执行前运行 `git pull --ff-only`，报告 HEAD SHA。当前回归必须基于含 `frontend/vite.config.ts` 的 `/lessons`、`/notifications`、`/dashboard` 代理配置的 HEAD。
 
+## 2026-07-20 基线修正（必须遵守）
+
+上一轮报告仅 9/60 通过，主要是测试脚本与已冻结契约、当前页面 DOM 不一致，不得把这些脚本假设当成产品缺陷重复执行：
+
+- 错误密码的稳定错误码是 **40102**，不是 40101；40101 只表示未认证或失效会话。
+- 开发代理与 SPA 同名路径已修复：HTML document 深链接必须由 Vite 返回 SPA，JSON/fetch 请求仍须真实代理到后端。先对 `/students`、`/lessons`、`/dashboard` 各做一次 `page.goto` 路由守卫验证，禁止用 `page.route` 绕过。
+- 选择器必须优先使用当前源码实际存在的 `data-testid`，不存在时用可访问角色/文本；不要沿用旧脚本中已删除的 testid。
+- 安全检查只检查真实敏感**值**、请求 Authorization header 和响应字段；`input[type=password]`、标签文字 `password` 等正常 UI 文案不是泄漏。
+- API fixture 失败时，报告必须记录 HTTP status、稳定 code 和 response body，再判断是 fixture、选择器、契约还是产品缺陷；不得仅断言布尔值或用提高超时掩盖问题。
+- 页面可能嵌套多个 `<main>`；工作台必须定位 `[data-testid="dashboard-view"]`，不可使用宽泛 `locator('main')`。
+
 ## 环境与硬约束
 
 - 使用新的临时数据库、上传目录、备份目录；不得使用或删除共享/真实数据。

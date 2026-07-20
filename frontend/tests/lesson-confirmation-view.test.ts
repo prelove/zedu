@@ -49,6 +49,7 @@ describe('LessonsView confirmation', () => {
     expect(wrapper.get('[data-testid="lesson-confirm-dialog"]').exists()).toBe(true)
     await wrapper.get('[data-testid="lesson-confirm-outcome"]').setValue('STUDENT_LEAVE')
     await wrapper.get('[data-testid="lesson-confirm-deducted"]').setValue('0.5')
+    expect((wrapper.get('[data-testid="lesson-confirm-deducted"]').element as HTMLInputElement).checkValidity()).toBe(true)
     await wrapper.get('[data-testid="lesson-confirm-charge"]').setValue('1200')
     await wrapper.get('[data-testid="lesson-confirm-teacher-pay"]').setValue('800')
     await wrapper.get('[data-testid="lesson-confirm-submit"]').trigger('submit')

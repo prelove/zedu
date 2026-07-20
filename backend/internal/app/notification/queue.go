@@ -3,11 +3,12 @@ package notification
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"github.com/prelove/zedu/backend/internal/repository"
 	"html"
 	"strings"
-	"time"
 )
 
 // QueueLesson queues student and parent email notifications in the caller's transaction.
@@ -64,7 +65,7 @@ func ClaimAndSend(ctx context.Context, db repository.DB, sender Sender) error {
 	var to, subject, body string
 	err = tx.QueryRowContext(ctx, `SELECT id,recipient_email,subject,html_body FROM notification_outbox WHERE status IN ('PENDING','FAILED') AND attempts<3 AND available_at<=CURRENT_TIMESTAMP ORDER BY id LIMIT 1`).Scan(&id, &to, &subject, &body)
 	if err != nil {
-		if err.Error() == "sql: no rows in result set" {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
 		return repository.ErrDatabase
@@ -83,7 +84,7 @@ func ClaimAndSend(ctx context.Context, db repository.DB, sender Sender) error {
 	committed = true
 	msgID, sendErr := sender.Send(ctx, to, subject, body)
 	if sendErr != nil {
-		_, err = db.ExecContext(ctx, `UPDATE notification_outbox SET status='FAILED',last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`, sanitize(sendErr.Error()), id)
+		_, err = db.ExecContext(ctx, `UPDATE notification_outbox SET status='FAILED',last_error=?,available_at=DATETIME(CURRENT_TIMESTAMP, '+5 minutes'),updated_at=CURRENT_TIMESTAMP WHERE id=?`, sanitize(sendErr.Error()), id)
 		if err != nil {
 			return repository.ErrDatabase
 		}
@@ -95,10 +96,5 @@ func ClaimAndSend(ctx context.Context, db repository.DB, sender Sender) error {
 	return nil
 }
 func sanitize(v string) string {
-	if len(v) > 240 {
-		return v[:240]
-	}
-	return strings.ReplaceAll(v, "\n", " ")
+	return "delivery failed"
 }
-
-var _ = time.Now

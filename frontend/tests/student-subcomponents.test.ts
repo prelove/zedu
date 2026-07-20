@@ -290,6 +290,17 @@ describe('EnrollmentsSection', () => {
     vi.restoreAllMocks()
   })
 
+  it('renders enrollment controls without missing i18n keys', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    setupFetch()
+    mount(EnrollmentsSection, {
+      props: { studentId: 1, studentStatus: 'ACTIVE' },
+      global: { plugins: [testI18n(), testRouter()] },
+    })
+    await flushPromises()
+    expect(warn.mock.calls.flat().join(' ')).not.toContain('[intlify] Not found')
+  })
+
   function setupFetch(opts: { enrollments?: any[]; error?: boolean; postError?: boolean } = {}): void {
     const enrollments = opts.enrollments ?? [
       { id: 5, studentId: 1, domainId: 1, trackId: 1, currentLevelId: 1, targetLevelId: 2, enrollmentType: 'R', status: 'ACTIVE', createdAt: '', updatedAt: '' },
@@ -449,7 +460,6 @@ describe('EnrollmentsSection', () => {
     expect(wrapper.emitted('viewEnrollment')).toBeTruthy()
   })
 })
-
 
 
 

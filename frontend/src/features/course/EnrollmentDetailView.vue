@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { authStore } from '../../stores/auth'
 import { getEnrollment, type Enrollment } from '../../api/course'
 import { listTeachers, type Teacher } from '../../api/directory'
+import { ApiError, NetworkError } from '../../api/http'
+import { errorToI18nKey } from '../../api/error-mapping'
 import LoadingState from '../../components/LoadingState.vue'
 import ErrorState from '../../components/ErrorState.vue'
 import CourseSelectionSection from './components/CourseSelectionSection.vue'
@@ -19,12 +21,19 @@ const { t } = useI18n()
 const enrollment = ref<Enrollment | null>(null)
 const loading = ref(false)
 const error = ref<unknown>(null)
+const teachers = ref<Teacher[]>([])
+const teacherLoadError = ref<string | null>(null)
 
 const { domains, tracks, levels, error: dictError, load: loadDict } = useDictionary()
 
-const teachers = ref<Teacher[]>([])
-
 const enrollmentId = () => Number(props.id)
+const canManageAssignments = computed(() => teacherLoadError.value === null)
+
+function toErrorKey(err: unknown): string {
+  if (err instanceof NetworkError) return 'errors.NETWORK_ERROR'
+  if (err instanceof ApiError) return errorToI18nKey(err) ?? 'errors.UNKNOWN'
+  return 'errors.UNKNOWN'
+}
 
 async function loadEnrollment(): Promise<void> {
   loading.value = true
@@ -39,13 +48,20 @@ async function loadEnrollment(): Promise<void> {
 }
 
 async function loadTeachers(): Promise<void> {
+  teacherLoadError.value = null
   try {
     const data = await authStore.authedRequest((token) => listTeachers(token, { pageSize: 100 }))
     teachers.value = data.items
-  } catch {
-    // Non-critical: assignment creation will show empty teacher list.
+  } catch (err) {
     teachers.value = []
+    teacherLoadError.value = toErrorKey(err) === 'errors.NETWORK_ERROR'
+      ? 'errors.NETWORK_ERROR'
+      : 'enrollments.teacherLoadFailed'
   }
+}
+
+function onSaved(updated: Enrollment): void {
+  enrollment.value = updated
 }
 
 onMounted(() => {
@@ -53,10 +69,6 @@ onMounted(() => {
   void loadDict()
   void loadTeachers()
 })
-
-function onSaved(updated: Enrollment): void {
-  enrollment.value = updated
-}
 </script>
 
 <template>
@@ -102,6 +114,9 @@ function onSaved(updated: Enrollment): void {
       <AssignmentsSection
         :enrollment-id="enrollmentId()"
         :teachers="teachers"
+        :can-manage-assignments="canManageAssignments"
+        :teacher-load-error="teacherLoadError"
+        @retry-teachers="loadTeachers"
       />
     </template>
   </div>

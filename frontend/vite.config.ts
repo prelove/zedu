@@ -2,8 +2,55 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { resolve } from 'node:path'
 
+const spaRoutes = [
+  '/',
+  '/login',
+  '/dashboard',
+  '/onboarding',
+  '/students',
+  '/teachers',
+  '/courses',
+  '/finance/config',
+  '/finance/payments',
+  '/lessons',
+  '/notifications',
+  '/enrollments',
+] as const
+
+/**
+ * API paths intentionally share names with client routes. A document
+ * navigation must therefore reach Vite's SPA fallback, while fetch requests
+ * (whose Accept normally permits any media type or requests JSON) must proxy.
+ */
+export function isSpaNavigationRequest(url: string | undefined, accept: string | undefined): boolean {
+  if (!accept?.includes('text/html')) {
+    return false
+  }
+
+  const pathname = (url ?? '/').split('?', 1)[0]
+  return spaRoutes.some((route) => {
+    if (route === '/') {
+      return pathname === route
+    }
+    return pathname === route || pathname.startsWith(`${route}/`)
+  })
+}
+
 export default defineConfig({
-  plugins: [vue()],
+  plugins: [
+    vue(),
+    {
+      name: 'zedu-spa-navigation-before-api-proxy',
+      configureServer(server) {
+        server.middlewares.use((req, _res, next) => {
+          if (isSpaNavigationRequest(req.url, req.headers.accept)) {
+            req.url = '/index.html'
+          }
+          next()
+        })
+      },
+    },
+  ],
   resolve: {
     alias: {
       '@': resolve(__dirname, 'src'),

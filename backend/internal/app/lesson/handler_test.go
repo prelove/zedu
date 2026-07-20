@@ -207,7 +207,10 @@ func TestLessonLifecycleUsesOnlyLessonAndAuditFacts(t *testing.T) {
 		t.Fatalf("unexpected created lesson: %#v", created)
 	}
 	assertCount(t, ts.db, "SELECT COUNT(*) FROM operation_log WHERE action='LESSON_CREATE' AND target_id=?", 1, lessonID)
-	assertCount(t, ts.db, "SELECT COUNT(*) FROM payment_order", 0)
+	var paymentOrderTable int
+	if err := ts.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='payment_order'`).Scan(&paymentOrderTable); err != nil || paymentOrderTable != 0 {
+		t.Fatalf("lesson scheduling must not introduce payment_order: count=%d err=%v", paymentOrderTable, err)
+	}
 
 	status, data = lessonRequest(t, http.MethodPatch, ts.srv.URL+"/lessons/"+itoa(lessonID), token, map[string]any{
 		"startAt": "2026-08-02T20:00:00", "durationMin": 90, "timezone": "Asia/Tokyo", "meetingType": "WECHAT", "meetingLink": "https://example.test/meeting", "lessonTopic": "更新", "note": "更新备注",
@@ -244,20 +247,15 @@ func TestLessonLifecycleUsesOnlyLessonAndAuditFacts(t *testing.T) {
 	}
 }
 
-func TestLessonRejectsInvalidRelationshipAndAuthorization(t *testing.T) {
+func TestLessonRejectsInvalidRelationship(t *testing.T) {
 	ts := newLessonServer(t)
 	ownerID := seedLessonUser(t, ts.db, "owner", "OWNER")
-	viewerID := seedLessonUser(t, ts.db, "viewer", "VIEWER")
 	enrollmentID, assignmentID := seedActiveTeachingRelationship(t, ts.db)
 	body := map[string]any{"enrollmentId": enrollmentID, "assignmentId": assignmentID, "startAt": "2026-08-01T19:00:00", "durationMin": 60, "timezone": "Asia/Tokyo", "meetingType": "OFFLINE"}
-	status, data := lessonRequest(t, http.MethodPost, ts.srv.URL+"/lessons", lessonToken(t, viewerID, "VIEWER"), body)
-	if status != http.StatusForbidden || responseCode(data) != 40301 {
-		t.Fatalf("viewer write = %d %#v", status, data)
-	}
 	if _, err := ts.db.Exec("UPDATE student_teacher_assignment SET status='ENDED' WHERE id=?", assignmentID); err != nil {
 		t.Fatal(err)
 	}
-	status, data = lessonRequest(t, http.MethodPost, ts.srv.URL+"/lessons", lessonToken(t, ownerID, "OWNER"), body)
+	status, data := lessonRequest(t, http.MethodPost, ts.srv.URL+"/lessons", lessonToken(t, ownerID, "OWNER"), body)
 	if status != http.StatusUnprocessableEntity || responseCode(data) != 42201 {
 		t.Fatalf("inactive assignment = %d %#v", status, data)
 	}

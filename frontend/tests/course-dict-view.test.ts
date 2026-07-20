@@ -356,4 +356,54 @@ describe('CourseDictionaryView', () => {
 
     expect(wrapper.find('[data-testid="state-error"]').exists()).toBe(true)
   })
+
+  it('requests and renders the next page for the active tab', async () => {
+    const calls: string[] = []
+    globalThis.fetch = vi.fn().mockImplementation((url: string) => {
+      calls.push(url)
+      if (url.startsWith('/course-domains?page=2&pageSize=1')) {
+        return Promise.resolve(mockResponse({
+          code: 0,
+          data: {
+            items: [{ id: 2, name: 'EN', code: 'en', type: 'LANGUAGE', sortOrder: 1, enabled: true, createdAt: '', updatedAt: '' }],
+            page: 2,
+            pageSize: 1,
+            total: 2,
+          },
+        }))
+      }
+      if (url.startsWith('/course-domains')) {
+        return Promise.resolve(mockResponse({
+          code: 0,
+          data: {
+            items: [{ id: 1, name: 'JP', code: 'jp', type: 'LANGUAGE', sortOrder: 0, enabled: true, createdAt: '', updatedAt: '' }],
+            page: 1,
+            pageSize: 1,
+            total: 2,
+          },
+        }))
+      }
+      if (url.startsWith('/tracks')) {
+        return Promise.resolve(mockResponse({ code: 0, data: { items: [], page: 1, pageSize: 20, total: 0 } }))
+      }
+      if (url.startsWith('/levels')) {
+        return Promise.resolve(mockResponse({ code: 0, data: { items: [], page: 1, pageSize: 20, total: 0 } }))
+      }
+      if (url.startsWith('/capability-tags')) {
+        return Promise.resolve(mockResponse({ code: 0, data: { items: [], page: 1, pageSize: 20, total: 0 } }))
+      }
+      return Promise.resolve(mockResponse({ code: 0, data: { items: [], page: 1, pageSize: 20, total: 0 } }))
+    })
+
+    const wrapper = mount(CourseDictionaryView, { global: { plugins: [testI18n(), testRouter()] } })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('JP')
+    await wrapper.find('[data-testid="pagination-next"]').trigger('click')
+    await flushPromises()
+
+    expect(calls).toContain('/course-domains?page=2&pageSize=1')
+    expect(wrapper.text()).toContain('EN')
+    expect(wrapper.text()).not.toContain('JP')
+  })
 })

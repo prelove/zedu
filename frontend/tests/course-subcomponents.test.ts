@@ -200,6 +200,29 @@ describe('LevelChangeSection', () => {
     expect(wrapper.emitted('saved')).toBeTruthy()
   })
 
+  it('rejects the same level after a successful transition without a second PATCH', async () => {
+    // The backend deliberately keeps enrollment.currentLevelId as its initial
+    // snapshot and records later changes as level events. The UI must retain
+    // the effective level for this open page rather than trust that snapshot.
+    globalThis.fetch = vi.fn().mockResolvedValue(mockResponse({ code: 0, data: sampleEnrollment }))
+    const wrapper = mount(LevelChangeSection, {
+      props: { enrollment: sampleEnrollment, levels: sampleLevels, dictError: null },
+      global: { plugins: [testI18n(), testRouter()] },
+    })
+
+    await wrapper.find('[data-testid="sel-current-level"]').setValue(2)
+    await wrapper.find('[data-testid="save-level-change"]').trigger('click')
+    await flushPromises()
+    await wrapper.find('[data-testid="save-level-change"]').trigger('click')
+    await flushPromises()
+
+    const patches = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls
+      .filter(([url, options]) => url === '/enrollments/5' && options?.method === 'PATCH')
+    expect(patches).toHaveLength(1)
+    expect(wrapper.find('[data-testid="level-change-error"]').text())
+      .toContain(zhCN.enrollments.sameLevelRejected)
+  })
+
   it('shows save error on PATCH failure', async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(mockResponse({ code: 50001, message: 'INTERNAL_ERROR', requestId: 'r1' }, 500))
     const wrapper = mount(LevelChangeSection, {

@@ -6,8 +6,8 @@ INSERT OR IGNORE INTO attendance_outcome_type(code,name,suggested_lesson_deducte
 ALTER TABLE student_account_ledger RENAME TO student_account_ledger_m3;
 CREATE TABLE student_account_ledger (
  id INTEGER PRIMARY KEY AUTOINCREMENT, student_id INTEGER NOT NULL REFERENCES student(id), enrollment_id INTEGER NOT NULL REFERENCES student_course_enrollment(id),
- biz_type TEXT NOT NULL CHECK(biz_type IN ('RECHARGE','VOID','LESSON_CONFIRM')), amount_delta INTEGER NOT NULL, lesson_delta INTEGER NOT NULL DEFAULT 0,
- balance_after INTEGER NOT NULL, lesson_balance_after INTEGER NOT NULL, related_payment_id INTEGER REFERENCES student_payment(id), operator_id INTEGER REFERENCES user_account(id), note TEXT, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+ biz_type TEXT NOT NULL CHECK(biz_type IN ('RECHARGE','VOID','LESSON_CONFIRM')), amount_delta INTEGER NOT NULL, lesson_delta REAL NOT NULL DEFAULT 0,
+ balance_after INTEGER NOT NULL, lesson_balance_after REAL NOT NULL, related_payment_id INTEGER REFERENCES student_payment(id), operator_id INTEGER REFERENCES user_account(id), note TEXT, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 INSERT INTO student_account_ledger(id,student_id,enrollment_id,biz_type,amount_delta,lesson_delta,balance_after,lesson_balance_after,related_payment_id,operator_id,note,created_at) SELECT id,student_id,enrollment_id,biz_type,amount_delta,lesson_delta,balance_after,lesson_balance_after,related_payment_id,operator_id,note,created_at FROM student_account_ledger_m3;
 DROP TABLE student_account_ledger_m3;
